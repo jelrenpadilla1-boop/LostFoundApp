@@ -27,13 +27,28 @@ export const messagesAPI = {
         }
     },
     
-    // Send a message
+    // Send a text message
     sendMessage: async (conversationId, content) => {
         try {
             const response = await api.post(`/messages/${conversationId}/send`, { message: content });
             return response;
         } catch (error) {
             console.error('Error sending message:', error);
+            throw error;
+        }
+    },
+    
+    // Send a photo message
+    sendPhoto: async (conversationId, formData) => {
+        try {
+            const response = await api.post(`/messages/${conversationId}/send-photo`, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            });
+            return response;
+        } catch (error) {
+            console.error('Error sending photo:', error);
             throw error;
         }
     },
@@ -89,6 +104,86 @@ export const messagesAPI = {
             return response;
         } catch (error) {
             console.error('Error marking as read:', error);
+            return { data: { success: false } };
+        }
+    },
+    
+    // Delete a message
+    deleteMessage: async (messageId) => {
+        try {
+            const response = await api.delete(`/messages/${messageId}`);
+            return response;
+        } catch (error) {
+            console.error('Error deleting message:', error);
+            throw error;
+        }
+    },
+    
+    // FIXED: Delete a conversation - using the correct endpoint
+    deleteConversation: async (conversationId) => {
+        try {
+            const response = await api.delete(`/messages/${conversationId}/delete`);
+            return response;
+        } catch (error) {
+            console.error('Error deleting conversation:', error);
+            throw error;
+        }
+    },
+    
+    // Get conversation details
+    getConversationDetails: async (conversationId) => {
+        try {
+            const response = await api.get(`/messages/conversation/${conversationId}/details`);
+            return response;
+        } catch (error) {
+            console.error('Error fetching conversation details:', error);
+            throw error;
+        }
+    },
+    
+    // Search messages in conversation
+    searchMessages: async (conversationId, query) => {
+        try {
+            const response = await api.get(`/messages/conversation/${conversationId}/search`, { params: { query } });
+            return response;
+        } catch (error) {
+            console.error('Error searching messages:', error);
+            return { data: { messages: [], count: 0 } };
+        }
+    },
+    
+    // Get unread conversations count
+    getUnreadConversations: async () => {
+        try {
+            const response = await api.get('/messages/unread/conversations');
+            return response;
+        } catch (error) {
+            console.error('Error fetching unread conversations:', error);
+            return { data: { count: 0 } };
+        }
+    },
+    
+    // Get unread count for specific conversation
+    getConversationUnreadCount: async (conversationId) => {
+        try {
+            const response = await api.get(`/messages/${conversationId}/unread`);
+            return response;
+        } catch (error) {
+            console.error('Error fetching conversation unread count:', error);
+            return { data: { count: 0 } };
+        }
+    },
+    
+    // Send typing indicator
+    sendTypingIndicator: async (conversationId, isTyping) => {
+        try {
+            const response = await api.post('/messages/typing', { 
+                conversation_id: conversationId, 
+                is_typing: isTyping 
+            });
+            return response;
+        } catch (error) {
+            console.error('Error sending typing indicator:', error);
             return { data: { success: false } };
         }
     },

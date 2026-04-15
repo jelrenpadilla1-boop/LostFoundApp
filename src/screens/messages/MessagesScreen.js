@@ -33,6 +33,8 @@ export default function MessagesScreen({ navigation }) {
     const [showNewChat, setShowNewChat] = useState(false);
     const [users, setUsers] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
+    const [selectedConversation, setSelectedConversation] = useState(null);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
     const { user } = useAuth();
     const { addNotificationListener } = useSocket();
     const { isDark, toggleTheme } = useTheme();
@@ -145,6 +147,30 @@ export default function MessagesScreen({ navigation }) {
         }
     };
 
+    const deleteConversation = async () => {
+        if (!selectedConversation) return;
+        
+        try {
+            const response = await messagesAPI.deleteConversation(selectedConversation.id);
+            if (response.data && response.data.success) {
+                Alert.alert('Success', 'Conversation deleted successfully');
+                setShowDeleteModal(false);
+                setSelectedConversation(null);
+                loadConversations();
+            } else {
+                Alert.alert('Error', response.data?.message || 'Failed to delete conversation');
+            }
+        } catch (error) {
+            console.error('Error deleting conversation:', error);
+            Alert.alert('Error', error.response?.data?.message || 'Failed to delete conversation');
+        }
+    };
+
+    const confirmDelete = (conversation) => {
+        setSelectedConversation(conversation);
+        setShowDeleteModal(true);
+    };
+
     const getOtherUser = (conversation) => {
         if (!conversation) return null;
         if (conversation.user1_id === user?.id) {
@@ -170,6 +196,25 @@ export default function MessagesScreen({ navigation }) {
         if (diffHours < 24) return `${diffHours}h`;
         if (diffDays < 7) return `${diffDays}d`;
         return date.toLocaleDateString();
+    };
+
+    const getLastMessagePreview = (conversation) => {
+        const lastMessage = conversation.last_message || conversation.lastMessage;
+        if (!lastMessage) return 'No messages yet';
+        
+        // Check if it's a photo message
+        if (lastMessage.type === 'photo' || (lastMessage.photo && !lastMessage.content)) {
+            return '📷 Photo';
+        }
+        
+        // Check if it's a text message
+        if (lastMessage.content) {
+            return lastMessage.content.length > 40 
+                ? lastMessage.content.substring(0, 40) + '...' 
+                : lastMessage.content;
+        }
+        
+        return 'No messages yet';
     };
 
     const getImageUrl = (photo) => {
@@ -199,6 +244,7 @@ export default function MessagesScreen({ navigation }) {
                 }]}
                 onPress={() => navigation.navigate('Chat', { conversationId: item.id })}
                 activeOpacity={0.7}
+                onLongPress={() => confirmDelete(item)}
             >
                 <View style={styles.avatarContainer}>
                     {getImageUrl(otherUser.profile_photo) ? (
@@ -228,7 +274,7 @@ export default function MessagesScreen({ navigation }) {
                     </View>
                     <View style={styles.messagePreview}>
                         <Text style={[styles.lastMessage, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]} numberOfLines={1}>
-                            {lastMessage?.content || 'No messages yet'}
+                            {getLastMessagePreview(item)}
                         </Text>
                         {unreadCount > 0 && (
                             <View style={styles.unreadBadge}>
@@ -239,6 +285,12 @@ export default function MessagesScreen({ navigation }) {
                         )}
                     </View>
                 </View>
+                <TouchableOpacity 
+                    style={styles.deleteButton}
+                    onPress={() => confirmDelete(item)}
+                >
+                    <Feather name="trash-2" size={18} color={isDark ? '#666666' : '#ef4444'} />
+                </TouchableOpacity>
             </TouchableOpacity>
         );
     };
@@ -276,7 +328,12 @@ export default function MessagesScreen({ navigation }) {
                             </Text>
                         </View>
                         
-                       
+                        <TouchableOpacity
+                            style={styles.themeToggle}
+                            onPress={toggleTheme}
+                        >
+                            <Feather name={isDark ? 'sun' : 'moon'} size={20} color="#e50914" />
+                        </TouchableOpacity>
                     </View>
                 </LinearGradient>
 
@@ -396,6 +453,42 @@ export default function MessagesScreen({ navigation }) {
                         </View>
                     </View>
                 </Modal>
+
+                {/* Delete Confirmation Modal */}
+                <Modal 
+                    visible={showDeleteModal} 
+                    animationType="fade" 
+                    transparent
+                    onRequestClose={() => setShowDeleteModal(false)}
+                >
+                    <View style={styles.deleteModalOverlay}>
+                        <View style={[styles.deleteModalContent, { backgroundColor: isDark ? '#1a1a1a' : '#ffffff' }]}>
+                            <View style={styles.deleteModalHeader}>
+                                <Feather name="trash-2" size={40} color="#ef4444" />
+                                <Text style={[styles.deleteModalTitle, { color: isDark ? '#ffffff' : '#1a1a1a' }]}>
+                                    Delete Conversation?
+                                </Text>
+                                <Text style={[styles.deleteModalMessage, { color: isDark ? '#b3b3b3' : '#64748b' }]}>
+                                    This will permanently delete the entire conversation. This action cannot be undone.
+                                </Text>
+                            </View>
+                            <View style={styles.deleteModalButtons}>
+                                <TouchableOpacity
+                                    style={[styles.deleteModalButton, styles.deleteModalCancelButton]}
+                                    onPress={() => setShowDeleteModal(false)}
+                                >
+                                    <Text style={styles.deleteModalCancelText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.deleteModalButton, styles.deleteModalConfirmButton]}
+                                    onPress={deleteConversation}
+                                >
+                                    <Text style={styles.deleteModalConfirmText}>Delete</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
             </View>
         </>
     );
@@ -460,6 +553,7 @@ const getStyles = (isDark) => StyleSheet.create({
     },
     conversationCard: {
         flexDirection: 'row',
+        alignItems: 'center',
         padding: 16,
         marginBottom: 12,
         borderRadius: 16,
@@ -547,6 +641,10 @@ const getStyles = (isDark) => StyleSheet.create({
         fontSize: 11,
         fontWeight: 'bold',
         color: '#fff',
+    },
+    deleteButton: {
+        padding: 8,
+        marginLeft: 8,
     },
     fab: {
         position: 'absolute',
@@ -666,5 +764,61 @@ const getStyles = (isDark) => StyleSheet.create({
         marginTop: 12,
         fontSize: 14,
         textAlign: 'center',
+    },
+    // Delete Modal Styles
+    deleteModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.7)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    deleteModalContent: {
+        width: '85%',
+        borderRadius: 20,
+        overflow: 'hidden',
+        padding: 24,
+        alignItems: 'center',
+    },
+    deleteModalHeader: {
+        alignItems: 'center',
+        marginBottom: 24,
+    },
+    deleteModalTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    deleteModalMessage: {
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    deleteModalButtons: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%',
+    },
+    deleteModalButton: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: 'center',
+    },
+    deleteModalCancelButton: {
+        backgroundColor: isDark ? '#2a2a2a' : '#f1f5f9',
+    },
+    deleteModalConfirmButton: {
+        backgroundColor: '#ef4444',
+    },
+    deleteModalCancelText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: isDark ? '#b3b3b3' : '#64748b',
+    },
+    deleteModalConfirmText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#fff',
     },
 });

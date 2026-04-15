@@ -1,9 +1,9 @@
 // src/components/messages/ChatBubble.js
 import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
 
-export default function ChatBubble({ message, isMine }) {
+export default function ChatBubble({ message, isMine, onPhotoPress }) {
     const { isDark } = useTheme();
 
     const formatTime = (dateString) => {
@@ -12,8 +12,62 @@ export default function ChatBubble({ message, isMine }) {
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
+    const isPhotoMessage = message.type === 'photo' && message.photo;
+    const isTextMessage = message.type === 'text' || (!message.type && message.content);
+
     const styles = getStyles(isDark);
 
+    // Render photo message
+    if (isPhotoMessage) {
+        return (
+            <View style={[
+                styles.container,
+                isMine ? styles.myMessage : styles.theirMessage
+            ]}>
+                {!isMine && (
+                    <View style={styles.avatar}>
+                        <LinearGradient
+                            colors={['#e50914', '#b20710']}
+                            style={styles.avatarGradient}
+                        >
+                            <Text style={styles.avatarText}>
+                                {message.user?.name?.charAt(0).toUpperCase() || '?'}
+                            </Text>
+                        </LinearGradient>
+                    </View>
+                )}
+                <View style={[
+                    styles.bubble,
+                    styles.photoBubble,
+                    isMine ? styles.myPhotoBubble : styles.theirPhotoBubble
+                ]}>
+                    {!isMine && (
+                        <Text style={[styles.senderName, { color: isDark ? '#e50914' : '#e50914' }]}>
+                            {message.user?.name}
+                        </Text>
+                    )}
+                    <TouchableOpacity 
+                        onPress={() => onPhotoPress && onPhotoPress(message.photo)}
+                        activeOpacity={0.9}
+                    >
+                        <Image 
+                            source={{ uri: message.photo }} 
+                            style={styles.photo}
+                            resizeMode="cover"
+                        />
+                    </TouchableOpacity>
+                    <Text style={[
+                        styles.timeText,
+                        isMine ? styles.myTime : styles.theirTime
+                    ]}>
+                        {formatTime(message.created_at)}
+                    </Text>
+                </View>
+            </View>
+        );
+    }
+
+    // Render text message (existing)
     return (
         <View style={[
             styles.container,
@@ -44,7 +98,7 @@ export default function ChatBubble({ message, isMine }) {
                     styles.messageText,
                     isMine ? styles.myText : styles.theirText
                 ]}>
-                    {message.content}
+                    {message.content || message.message}
                 </Text>
                 <Text style={[
                     styles.timeText,
@@ -94,6 +148,10 @@ const getStyles = (isDark) => StyleSheet.create({
         paddingVertical: 10,
         borderRadius: 20,
     },
+    photoBubble: {
+        paddingHorizontal: 8,
+        paddingVertical: 8,
+    },
     myBubble: {
         backgroundColor: '#e50914',
         borderBottomRightRadius: 4,
@@ -104,6 +162,21 @@ const getStyles = (isDark) => StyleSheet.create({
         elevation: 2,
     },
     theirBubble: {
+        backgroundColor: isDark ? '#1a1a1a' : '#f0f0f0',
+        borderBottomLeftRadius: 4,
+        borderWidth: isDark ? 1 : 0,
+        borderColor: isDark ? '#333333' : 'transparent',
+    },
+    myPhotoBubble: {
+        backgroundColor: '#e50914',
+        borderBottomRightRadius: 4,
+        shadowColor: '#e50914',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    theirPhotoBubble: {
         backgroundColor: isDark ? '#1a1a1a' : '#f0f0f0',
         borderBottomLeftRadius: 4,
         borderWidth: isDark ? 1 : 0,
@@ -134,5 +207,10 @@ const getStyles = (isDark) => StyleSheet.create({
     },
     theirTime: {
         color: isDark ? '#666666' : '#999',
+    },
+    photo: {
+        width: 200,
+        height: 200,
+        borderRadius: 12,
     },
 });

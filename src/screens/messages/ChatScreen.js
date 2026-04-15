@@ -1,6 +1,7 @@
 // src/screens/messages/ChatScreen.js
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -9,6 +10,7 @@ import {
     FlatList,
     Image,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     RefreshControl,
     StatusBar,
@@ -36,7 +38,11 @@ export default function ChatScreen({ route, navigation }) {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [sending, setSending] = useState(false);
+    const [sendingPhoto, setSendingPhoto] = useState(false);
     const [currentConversationId, setCurrentConversationId] = useState(conversationId || null);
+    const [selectedPhoto, setSelectedPhoto] = useState(null);
+    const [photoModalVisible, setPhotoModalVisible] = useState(false);
+    const [selectedPhotoUrl, setSelectedPhotoUrl] = useState(null);
     const flatListRef = useRef(null);
     const subscriptionRef = useRef(null);
     const lastMessageIdRef = useRef(0);
@@ -197,6 +203,126 @@ export default function ChatScreen({ route, navigation }) {
         loadConversation();
     };
 
+    const pickImage = async () => {
+        // Request permissions
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission needed', 'Please grant camera roll permissions to send photos');
+            return;
+        }
+
+        // Launch image picker
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            quality: 0.8,
+            base64: false,
+        });
+
+        if (!result.canceled && result.assets && result.assets[0]) {
+            sendPhoto(result.assets[0].uri);
+        }
+    };
+
+    const takePhoto = async () => {
+        // Request permissions
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission needed', 'Please grant camera permissions to take photos');
+            return;
+        }
+
+        // Launch camera
+        const result = await ImagePicker.launchCameraAsync({
+            allowsEditing: true,
+            quality: 0.8,
+            base64: false,
+        });
+
+        if (!result.canceled && result.assets && result.assets[0]) {
+            sendPhoto(result.assets[0].uri);
+        }
+    };
+
+    const showImageOptions = () => {
+        Alert.alert(
+            'Send Photo',
+            'Choose an option',
+            [
+                { text: 'Take Photo', onPress: takePhoto },
+                { text: 'Choose from Library', onPress: pickImage },
+                { text: 'Cancel', style: 'cancel' }
+            ],
+            { cancelable: true }
+        );
+    };
+
+    const sendPhoto = async (uri) => {
+        if (sendingPhoto || !currentConversationId) return;
+        
+        setSendingPhoto(true);
+        
+        // Create form data
+        const formData = new FormData();
+        formData.append('photo', {
+            uri: uri,
+            type: 'image/jpeg',
+            name: `photo_${Date.now()}.jpg`,
+        });
+        
+        // Add optimistic message
+        const optimisticMessage = {
+            id: Date.now(),
+            content: '',
+            photo: uri,
+            type: 'photo',
+            user_id: user?.id,
+            created_at: new Date().toISOString(),
+            is_optimistic: true,
+            is_mine: true
+        };
+        setMessages(prev => [...prev, optimisticMessage]);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        
+        try {
+            const response = await messagesAPI.sendPhoto(currentConversationId, formData);
+            let sentMessage = null;
+            
+            if (response.data && response.data.message) {
+                sentMessage = response.data.message;
+            } else if (response.data && response.data.data) {
+                sentMessage = response.data.data;
+            } else if (response.data) {
+                sentMessage = response.data;
+            }
+            
+            if (sentMessage && sentMessage.id) {
+                // Replace optimistic message with real one
+                setMessages(prev => prev.map(msg => 
+                    msg.id === optimisticMessage.id ? sentMessage : msg
+                ));
+                
+                if (sentMessage.id > lastMessageIdRef.current) {
+                    lastMessageIdRef.current = sentMessage.id;
+                }
+            } else {
+                // If no proper response, remove optimistic message
+                setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
+            }
+            
+            setTimeout(() => {
+                flatListRef.current?.scrollToEnd({ animated: true });
+            }, 100);
+        } catch (error) {
+            console.error('Error sending photo:', error);
+            // Remove optimistic message on error
+            setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
+            Alert.alert('Error', error.response?.data?.message || 'Failed to send photo');
+        } finally {
+            setSendingPhoto(false);
+        }
+    };
+
     const handleSend = async () => {
         if (!newMessage.trim() || sending || !currentConversationId) return;
         
@@ -207,10 +333,12 @@ export default function ChatScreen({ route, navigation }) {
         // Add optimistic message
         const optimisticMessage = {
             id: Date.now(),
-            message: messageText,
+            content: messageText,
+            type: 'text',
             user_id: user?.id,
             created_at: new Date().toISOString(),
-            is_optimistic: true
+            is_optimistic: true,
+            is_mine: true
         };
         setMessages(prev => [...prev, optimisticMessage]);
         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -253,6 +381,16 @@ export default function ChatScreen({ route, navigation }) {
         } finally {
             setSending(false);
         }
+    };
+
+    const openPhotoModal = (photoUrl) => {
+        setSelectedPhotoUrl(photoUrl);
+        setPhotoModalVisible(true);
+    };
+
+    const closePhotoModal = () => {
+        setPhotoModalVisible(false);
+        setSelectedPhotoUrl(null);
     };
 
     const getOtherUser = () => {
@@ -354,6 +492,7 @@ export default function ChatScreen({ route, navigation }) {
                                 message={item}
                                 isMine={item.user_id === user?.id}
                                 isDark={isDark}
+                                onPhotoPress={openPhotoModal}
                             />
                         )}
                         onContentSizeChange={scrollToBottom}
@@ -387,6 +526,21 @@ export default function ChatScreen({ route, navigation }) {
                         borderTopColor: isDark ? '#333333' : '#edeef5'
                     }]}>
                         <View style={styles.inputContainer}>
+                            {/* Photo Attachment Button */}
+                            <TouchableOpacity
+                                style={styles.attachButton}
+                                onPress={showImageOptions}
+                                disabled={sending || sendingPhoto}
+                                activeOpacity={0.7}
+                            >
+                                <LinearGradient 
+                                    colors={['#e50914', '#b20710']} 
+                                    style={styles.attachGradient}
+                                >
+                                    <Feather name="image" size={20} color="#fff" />
+                                </LinearGradient>
+                            </TouchableOpacity>
+                            
                             <TextInput
                                 ref={inputRef}
                                 style={[styles.input, { 
@@ -400,15 +554,15 @@ export default function ChatScreen({ route, navigation }) {
                                 onChangeText={setNewMessage}
                                 multiline
                                 maxLength={500}
-                                editable={!sending}
+                                editable={!sending && !sendingPhoto}
                             />
                             <TouchableOpacity
                                 style={[
                                     styles.sendButton, 
-                                    (!newMessage.trim() || sending) && styles.sendButtonDisabled
+                                    (!newMessage.trim() || sending || sendingPhoto) && styles.sendButtonDisabled
                                 ]}
                                 onPress={handleSend}
-                                disabled={sending || !newMessage.trim()}
+                                disabled={sending || sendingPhoto || !newMessage.trim()}
                                 activeOpacity={0.8}
                             >
                                 <LinearGradient 
@@ -423,9 +577,44 @@ export default function ChatScreen({ route, navigation }) {
                                 </LinearGradient>
                             </TouchableOpacity>
                         </View>
+                        
+                        {/* Photo sending indicator */}
+                        {sendingPhoto && (
+                            <View style={styles.sendingPhotoContainer}>
+                                <ActivityIndicator size="small" color="#e50914" />
+                                <Text style={[styles.sendingPhotoText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>
+                                    Sending photo...
+                                </Text>
+                            </View>
+                        )}
                     </View>
                 </KeyboardAvoidingView>
             </View>
+
+            {/* Photo Modal */}
+            <Modal
+                visible={photoModalVisible}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={closePhotoModal}
+            >
+                <View style={styles.modalContainer}>
+                    <TouchableOpacity 
+                        style={styles.modalCloseButton} 
+                        onPress={closePhotoModal}
+                        activeOpacity={0.7}
+                    >
+                        <Feather name="x" size={24} color="#fff" />
+                    </TouchableOpacity>
+                    {selectedPhotoUrl && (
+                        <Image 
+                            source={{ uri: selectedPhotoUrl }} 
+                            style={styles.modalImage}
+                            resizeMode="contain"
+                        />
+                    )}
+                </View>
+            </Modal>
         </>
     );
 }
@@ -547,6 +736,23 @@ const getStyles = (isDark) => StyleSheet.create({
         alignItems: 'flex-end',
         gap: 10,
     },
+    attachButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        overflow: 'hidden',
+        shadowColor: '#e50914',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    attachGradient: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: '100%',
+    },
     input: {
         flex: 1,
         borderRadius: 22,
@@ -575,5 +781,37 @@ const getStyles = (isDark) => StyleSheet.create({
     },
     sendButtonDisabled: {
         opacity: 0.5,
+    },
+    sendingPhotoContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 8,
+        gap: 8,
+    },
+    sendingPhotoText: {
+        fontSize: 12,
+    },
+    modalContainer: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.95)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalCloseButton: {
+        position: 'absolute',
+        top: Platform.OS === 'ios' ? 60 : 40,
+        right: 20,
+        zIndex: 10,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalImage: {
+        width: '100%',
+        height: '100%',
     },
 });

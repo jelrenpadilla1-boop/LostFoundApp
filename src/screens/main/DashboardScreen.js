@@ -68,6 +68,7 @@ export default function DashboardScreen({ navigation }) {
   const loadData = async () => {
     try {
       setLoading(true);
+      
       const [statsRes, recentRes, matchStatsRes] = await Promise.all([
         api.get('/dashboard/stats'),
         api.get('/dashboard/recent-items'),
@@ -75,8 +76,45 @@ export default function DashboardScreen({ navigation }) {
       ]);
 
       const statsData = statsRes.data;
-      const recentData = recentRes.data;
       const matchStatsData = matchStatsRes.data?.stats || matchStatsRes.data || {};
+      
+      // Handle recent items response
+      let recentData = [];
+      if (recentRes.data) {
+        if (Array.isArray(recentRes.data)) {
+          recentData = recentRes.data;
+        } else if (recentRes.data.data && Array.isArray(recentRes.data.data)) {
+          recentData = recentRes.data.data;
+        } else if (recentRes.data.items && Array.isArray(recentRes.data.items)) {
+          recentData = recentRes.data.items;
+        } else if (recentRes.data.recent_items && Array.isArray(recentRes.data.recent_items)) {
+          recentData = recentRes.data.recent_items;
+        } else {
+          for (const key in recentRes.data) {
+            if (Array.isArray(recentRes.data[key])) {
+              recentData = recentRes.data[key];
+              break;
+            }
+          }
+        }
+      }
+      
+      console.log('Recent items count:', recentData.length);
+      
+      // Filter items by type - EXCLUDE pending and rejected
+      const lost = recentData.filter(i => 
+        i.type === 'lost' && 
+        i.status !== 'pending' && 
+        i.status !== 'rejected'
+      );
+      const found = recentData.filter(i => 
+        i.type === 'found' && 
+        i.status !== 'pending' && 
+        i.status !== 'rejected'
+      );
+      
+      setRecentLost(lost);
+      setRecentFound(found);
 
       if (isAdmin) {
         try {
@@ -96,11 +134,6 @@ export default function DashboardScreen({ navigation }) {
           setHighMatches(matches.filter(m => parseFloat(m.match_score) >= 60));
         } catch (e) { console.error('Matches error:', e); }
       }
-
-      const lost = Array.isArray(recentData) ? recentData.filter(i => i.type === 'lost') : [];
-      const found = Array.isArray(recentData) ? recentData.filter(i => i.type === 'found') : [];
-      setRecentLost(lost);
-      setRecentFound(found);
 
       setStats({
         total_lost_items: statsData.total_lost_items ?? 0,
@@ -463,8 +496,6 @@ export default function DashboardScreen({ navigation }) {
               </TouchableOpacity>
             </View>
           </View>
-
-         
         </Animated.View>
 
         {/* ── Stats cards ── */}
@@ -627,20 +658,21 @@ function StatusPill({ status, C }) {
     rejected: { bg: C.redMuted,   fg: C.red   },
     found:    { bg: C.blueMuted,  fg: C.blue  },
     claimed:  { bg: C.greenMuted, fg: C.green },
+    returned: { bg: C.amberMuted, fg: C.amber },
+    recovered: { bg: C.greenMuted, fg: C.green },
+    disposed: { bg: C.textMuted,  fg: C.textFaint },
   };
-  const s = map[status] || map.pending;
+  const s = map[status] || map.approved;
   return (
     <View style={[styles.statusPill, { backgroundColor: s.bg }]}>
-      <Text style={[styles.statusPillText, { color: s.fg }]}>{(status || 'pending').toUpperCase()}</Text>
+      <Text style={[styles.statusPillText, { color: s.fg }]}>{(status || 'approved').toUpperCase()}</Text>
     </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
+  root: { flex: 1 },
 
   // Header
   header: {
@@ -662,10 +694,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.5,
   },
-  headerRight: {
-    flexDirection: 'row',
-    gap: 8,
-  },
+  headerRight: { flexDirection: 'row', gap: 8 },
   iconBtn: {
     width: 38,
     height: 38,
@@ -692,49 +721,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  avatarInitial: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  greetingName: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  greetingRole: {
-    fontSize: 11,
-    marginTop: 1,
-  },
-  onlineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-
-  // Hero strip (user)
-  heroStrip: {
-    flexDirection: 'row',
-    borderRadius: 16,
-    borderWidth: 1,
-    overflow: 'hidden',
-    marginBottom: 24,
-  },
-  heroItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  heroValue: {
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  heroLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginTop: 3,
-  },
+  avatarInitial: { fontSize: 16, fontWeight: '700' },
+  greetingName: { fontSize: 14, fontWeight: '600' },
+  greetingRole: { fontSize: 11, marginTop: 1 },
+  onlineDot: { width: 8, height: 8, borderRadius: 4 },
 
   // Section label
   sectionLabel: {
@@ -744,32 +734,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginTop: 4,
   },
-  sectionLabelLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  sectionDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-  },
-  sectionLabelText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  sectionAction: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
+  sectionLabelLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sectionDot: { width: 5, height: 5, borderRadius: 3 },
+  sectionLabelText: { fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  sectionAction: { fontSize: 11, fontWeight: '600' },
 
   // Stats row
-  statsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 20,
-  },
+  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 20 },
   statCard: {
     flex: 1,
     borderRadius: 12,
@@ -778,31 +749,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  statIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  statLabel: {
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
+  statIconWrap: { width: 34, height: 34, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
+  statValue: { fontSize: 20, fontWeight: '800', letterSpacing: -0.5 },
+  statLabel: { fontSize: 9, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
 
   // List card
-  listCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
+  listCard: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   listCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -811,20 +763,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     gap: 8,
   },
-  listCardAccent: {
-    width: 3,
-    height: 14,
-    borderRadius: 2,
-  },
-  listCardTitle: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  listCardViewAll: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
+  listCardAccent: { width: 3, height: 14, borderRadius: 2 },
+  listCardTitle: { flex: 1, fontSize: 13, fontWeight: '600' },
+  listCardViewAll: { fontSize: 11, fontWeight: '600' },
 
   // Pending rows
   pendingRow: {
@@ -835,28 +776,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     gap: 10,
   },
-  pendingRowInfo: {
-    flex: 1,
-  },
-  pendingRowTitle: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  pendingRowSub: {
-    fontSize: 11,
-    marginTop: 2,
-  },
-  pendingRowActions: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  rowBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  pendingRowInfo: { flex: 1 },
+  pendingRowTitle: { fontSize: 13, fontWeight: '500' },
+  pendingRowSub: { fontSize: 11, marginTop: 2 },
+  pendingRowActions: { flexDirection: 'row', gap: 6 },
+  rowBtn: { width: 30, height: 30, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
 
   // Match row
   matchRow: {
@@ -867,31 +791,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     gap: 10,
   },
-  matchRowLeft: {
-    flex: 1,
-  },
-  matchRowTitle: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  matchRowSub: {
-    fontSize: 11,
-    marginTop: 2,
-  },
-  matchRowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  scorePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  scorePillText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  matchRowLeft: { flex: 1 },
+  matchRowTitle: { fontSize: 13, fontWeight: '500' },
+  matchRowSub: { fontSize: 11, marginTop: 2 },
+  matchRowRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  scorePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  scorePillText: { fontSize: 11, fontWeight: '700' },
 
   // Recent row
   recentRow: {
@@ -902,64 +807,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     gap: 10,
   },
-  recentDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  recentRowInfo: {
-    flex: 1,
-  },
-  recentRowName: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  recentRowDate: {
-    fontSize: 10,
-    marginTop: 2,
-  },
-  recentGrid: {
-    marginBottom: 20,
-  },
+  recentDot: { width: 28, height: 28, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  recentRowInfo: { flex: 1 },
+  recentRowName: { fontSize: 13, fontWeight: '500' },
+  recentRowDate: { fontSize: 10, marginTop: 2 },
+  recentGrid: { marginBottom: 20 },
 
   // Status pill
-  statusPill: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 5,
-  },
-  statusPillText: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
+  statusPill: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 },
+  statusPillText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.3 },
 
   // Empty slate
-  emptySlate: {
-    alignItems: 'center',
-    paddingVertical: 28,
-    gap: 8,
-  },
-  emptyIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 12,
-  },
+  emptySlate: { alignItems: 'center', paddingVertical: 28, gap: 8 },
+  emptyIcon: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { fontSize: 12 },
 
   // Actions
-  actionsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 20,
-  },
+  actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
   actionChip: {
     flexBasis: '22%',
     flexGrow: 1,
@@ -969,18 +833,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  actionChipIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionChipLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+  actionChipIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  actionChipLabel: { fontSize: 11, fontWeight: '600', textAlign: 'center' },
 
   // FAB
   fab: {
@@ -993,11 +847,5 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  fabInner: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  fabInner: { width: 54, height: 54, borderRadius: 27, justifyContent: 'center', alignItems: 'center' },
 });

@@ -122,11 +122,30 @@ export default function MatchDetailScreen({ route, navigation }) {
     );
   };
 
-  const handleContact = async (userId) => {
+  const handleContact = async (userId, userName) => {
     try {
       const response = await messagesAPI.startConversation(userId);
-      navigation.navigate('Chat', { conversationId: response.data.id });
+      let conversationId = null;
+      
+      if (response.data?.data?.id) {
+        conversationId = response.data.data.id;
+      } else if (response.data?.conversation?.id) {
+        conversationId = response.data.conversation.id;
+      } else if (response.data?.id) {
+        conversationId = response.data.id;
+      }
+      
+      if (conversationId) {
+        navigation.navigate('Chat', { 
+          conversationId: conversationId,
+          userId: userId,
+          userName: userName
+        });
+      } else {
+        Alert.alert('Error', 'Could not start conversation');
+      }
     } catch (error) {
+      console.error('Error starting conversation:', error);
       Alert.alert('Error', 'Could not start conversation');
     }
   };
@@ -142,6 +161,33 @@ export default function MatchDetailScreen({ route, navigation }) {
     if (numScore >= 80) return '#2e7d32';
     if (numScore >= 60) return '#f5c518';
     return '#e50914';
+  };
+
+  const getScoreClass = (score) => {
+    const numScore = parseFloat(score);
+    if (numScore >= 80) return 'high';
+    if (numScore >= 60) return 'medium';
+    return 'low';
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Unknown';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const formatDateTime = (dateString) => {
+    if (!dateString) return 'Unknown';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   const styles = getStyles(isDark);
@@ -175,6 +221,8 @@ export default function MatchDetailScreen({ route, navigation }) {
   const isOwnerLost = user?.id === lostItem?.user_id;
   const isOwnerFound = user?.id === foundItem?.user_id;
   const canConfirm = match.status === 'pending' && isAdmin;
+  const scoreClass = getScoreClass(match.match_score);
+  const matchScore = parseFloat(match.match_score).toFixed(1);
 
   return (
     <>
@@ -204,43 +252,86 @@ export default function MatchDetailScreen({ route, navigation }) {
         </LinearGradient>
 
         {/* Match Score Card */}
-        <View style={[styles.scoreCard, { 
+        <Animated.View style={[styles.scoreCard, { 
           backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
-          borderColor: isDark ? '#333333' : '#edeef5'
+          borderColor: isDark ? '#333333' : '#edeef5',
+          opacity: fadeAnim
         }]}>
           <View style={styles.scoreHeader}>
             <Text style={[styles.scoreHeaderTitle, { color: isDark ? '#b3b3b3' : '#64748b' }]}>Match Score</Text>
-            <Text style={[styles.scoreValue, { color: getScoreColor(match.match_score) }]}>
-              {parseFloat(match.match_score).toFixed(1)}%
+            <Text style={[styles.scoreValue, { color: getScoreColor(matchScore) }]}>
+              {matchScore}%
             </Text>
           </View>
           <View style={styles.scoreBar}>
-            <View style={[styles.scoreFill, { width: `${match.match_score}%`, backgroundColor: getScoreColor(match.match_score) }]} />
+            <View style={[styles.scoreFill, { width: `${matchScore}%`, backgroundColor: getScoreColor(matchScore) }]} />
+          </View>
+          <View style={styles.scoreBreakdown}>
+            <View style={styles.scoreBreakdownItem}>
+              <View style={styles.scoreBreakdownLabel}>
+                <Text style={[styles.scoreBreakdownLabelText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>Item Name</Text>
+                <Text style={[styles.scoreBreakdownValue, { color: '#e50914' }]}>30%</Text>
+              </View>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: '30%', backgroundColor: '#e50914' }]} />
+              </View>
+            </View>
+            <View style={styles.scoreBreakdownItem}>
+              <View style={styles.scoreBreakdownLabel}>
+                <Text style={[styles.scoreBreakdownLabelText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>Description</Text>
+                <Text style={[styles.scoreBreakdownValue, { color: '#16a34a' }]}>25%</Text>
+              </View>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: '25%', backgroundColor: '#16a34a' }]} />
+              </View>
+            </View>
+            <View style={styles.scoreBreakdownItem}>
+              <View style={styles.scoreBreakdownLabel}>
+                <Text style={[styles.scoreBreakdownLabelText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>Category</Text>
+                <Text style={[styles.scoreBreakdownValue, { color: '#f5c518' }]}>20%</Text>
+              </View>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: '20%', backgroundColor: '#f5c518' }]} />
+              </View>
+            </View>
+            <View style={styles.scoreBreakdownItem}>
+              <View style={styles.scoreBreakdownLabel}>
+                <Text style={[styles.scoreBreakdownLabelText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>Location</Text>
+                <Text style={[styles.scoreBreakdownValue, { color: '#2196f3' }]}>15%</Text>
+              </View>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: '15%', backgroundColor: '#2196f3' }]} />
+              </View>
+            </View>
+            <View style={styles.scoreBreakdownItem}>
+              <View style={styles.scoreBreakdownLabel}>
+                <Text style={[styles.scoreBreakdownLabelText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>Date</Text>
+                <Text style={[styles.scoreBreakdownValue, { color: '#e50914' }]}>10%</Text>
+              </View>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: '10%', backgroundColor: '#e50914' }]} />
+              </View>
+            </View>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: isDark ? '#2a2a2a' : '#f1f5f9' }]}>
             <Text style={[styles.statusText, { color: isDark ? '#e5e5e5' : '#475569' }]}>
               {match.status?.toUpperCase() || 'PENDING'}
             </Text>
           </View>
-        </View>
+        </Animated.View>
 
-        {/* Items Grid */}
-        <View style={styles.itemsGrid}>
+        {/* Items Comparison Grid */}
+        <Animated.View style={[styles.itemsGrid, { opacity: fadeAnim }]}>
           {/* Lost Item Card */}
           <View style={[styles.itemCard, { 
             backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
             borderColor: isDark ? '#333333' : '#edeef5'
           }]}>
-            <View style={styles.itemHeader}>
+            <View style={[styles.itemHeader, styles.lostHeader]}>
               <View style={[styles.itemBadge, styles.lostBadge]}>
-                <Feather name="alert-triangle" size={10} color="#e50914" />
-                <Text style={styles.itemBadgeText}>LOST</Text>
+                <Feather name="search" size={12} color="#e50914" />
+                <Text style={styles.itemBadgeText}>LOST ITEM</Text>
               </View>
-              {isOwnerLost && (
-                <View style={styles.ownerBadge}>
-                  <Text style={styles.ownerBadgeText}>Your item</Text>
-                </View>
-              )}
             </View>
             
             <TouchableOpacity 
@@ -259,7 +350,7 @@ export default function MatchDetailScreen({ route, navigation }) {
               </View>
               
               <Text style={[styles.itemName, { color: isDark ? '#ffffff' : '#0f172a' }]}>{lostItem?.item_name || 'Unknown Item'}</Text>
-              <Text style={[styles.itemCategory, { color: '#e50914' }]}>{lostItem?.category || 'Uncategorized'}</Text>
+              <Text style={[styles.itemCategory, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{lostItem?.category || 'Uncategorized'}</Text>
               
               <View style={styles.itemDetails}>
                 <View style={styles.itemDetail}>
@@ -271,27 +362,23 @@ export default function MatchDetailScreen({ route, navigation }) {
                 <View style={styles.itemDetail}>
                   <Feather name="calendar" size={10} color={isDark ? '#666666' : '#94a3b8'} />
                   <Text style={[styles.itemDetailText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>
-                    {lostItem?.date_lost ? new Date(lostItem.date_lost).toLocaleDateString() : 'Unknown'}
+                    Lost: {formatDate(lostItem?.date_lost)}
+                  </Text>
+                </View>
+                <View style={styles.itemDetail}>
+                  <Feather name="user" size={10} color={isDark ? '#666666' : '#94a3b8'} />
+                  <Text style={[styles.itemDetailText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>
+                    {lostItem?.user?.name || 'Unknown'} {isOwnerLost && <Text style={{ color: '#e50914' }}>(You)</Text>}
                   </Text>
                 </View>
               </View>
               
-              <Text style={[styles.itemReporter, { color: isDark ? '#b3b3b3' : '#94a3b8' }]}>
-                By: {lostItem?.user?.name || 'Unknown'}
-              </Text>
+              <View style={[styles.descriptionSection, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }]}>
+                <Text style={[styles.descriptionText, { color: isDark ? '#b3b3b3' : '#64748b' }]} numberOfLines={2}>
+                  {lostItem?.description || 'No description provided'}
+                </Text>
+              </View>
             </TouchableOpacity>
-            
-            {!isOwnerLost && lostItem?.user && (
-              <TouchableOpacity
-                style={styles.contactButton}
-                onPress={() => handleContact(lostItem.user_id)}
-              >
-                <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactGradient}>
-                  <Feather name="message-circle" size={14} color="#fff" />
-                  <Text style={styles.contactButtonText}>Message Owner</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
           </View>
 
           {/* Found Item Card */}
@@ -299,16 +386,11 @@ export default function MatchDetailScreen({ route, navigation }) {
             backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
             borderColor: isDark ? '#333333' : '#edeef5'
           }]}>
-            <View style={styles.itemHeader}>
+            <View style={[styles.itemHeader, styles.foundHeader]}>
               <View style={[styles.itemBadge, styles.foundBadge]}>
-                <Feather name="check-circle" size={10} color="#2e7d32" />
-                <Text style={styles.itemBadgeText}>FOUND</Text>
+                <Feather name="check-circle" size={12} color="#2e7d32" />
+                <Text style={styles.itemBadgeText}>FOUND ITEM</Text>
               </View>
-              {isOwnerFound && (
-                <View style={styles.ownerBadge}>
-                  <Text style={styles.ownerBadgeText}>Your item</Text>
-                </View>
-              )}
             </View>
             
             <TouchableOpacity 
@@ -327,7 +409,7 @@ export default function MatchDetailScreen({ route, navigation }) {
               </View>
               
               <Text style={[styles.itemName, { color: isDark ? '#ffffff' : '#0f172a' }]}>{foundItem?.item_name || 'Unknown Item'}</Text>
-              <Text style={[styles.itemCategory, { color: '#e50914' }]}>{foundItem?.category || 'Uncategorized'}</Text>
+              <Text style={[styles.itemCategory, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{foundItem?.category || 'Uncategorized'}</Text>
               
               <View style={styles.itemDetails}>
                 <View style={styles.itemDetail}>
@@ -339,33 +421,83 @@ export default function MatchDetailScreen({ route, navigation }) {
                 <View style={styles.itemDetail}>
                   <Feather name="calendar" size={10} color={isDark ? '#666666' : '#94a3b8'} />
                   <Text style={[styles.itemDetailText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>
-                    {foundItem?.date_found ? new Date(foundItem.date_found).toLocaleDateString() : 'Unknown'}
+                    Found: {formatDate(foundItem?.date_found)}
+                  </Text>
+                </View>
+                <View style={styles.itemDetail}>
+                  <Feather name="user" size={10} color={isDark ? '#666666' : '#94a3b8'} />
+                  <Text style={[styles.itemDetailText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>
+                    {foundItem?.user?.name || 'Unknown'} {isOwnerFound && <Text style={{ color: '#2e7d32' }}>(You)</Text>}
                   </Text>
                 </View>
               </View>
               
-              <Text style={[styles.itemReporter, { color: isDark ? '#b3b3b3' : '#94a3b8' }]}>
-                By: {foundItem?.user?.name || 'Unknown'}
-              </Text>
+              <View style={[styles.descriptionSection, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc' }]}>
+                <Text style={[styles.descriptionText, { color: isDark ? '#b3b3b3' : '#64748b' }]} numberOfLines={2}>
+                  {foundItem?.description || 'No description provided'}
+                </Text>
+              </View>
             </TouchableOpacity>
-            
-            {!isOwnerFound && foundItem?.user && (
-              <TouchableOpacity
-                style={styles.contactButton}
-                onPress={() => handleContact(foundItem.user_id)}
-              >
-                <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactGradient}>
-                  <Feather name="message-circle" size={14} color="#fff" />
-                  <Text style={styles.contactButtonText}>Message Finder</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
           </View>
-        </View>
+        </Animated.View>
+
+        {/* Contact Information Section */}
+        <Animated.View style={[styles.contactSection, { opacity: fadeAnim }]}>
+          <Text style={[styles.contactTitle, { color: isDark ? '#ffffff' : '#0f172a' }]}>Contact Information</Text>
+          
+          <View style={[styles.contactCard, { 
+            backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+            borderColor: isDark ? '#333333' : '#edeef5'
+          }]}>
+            <View style={styles.contactRow}>
+              <View style={[styles.contactAvatar, { backgroundColor: isDark ? 'rgba(229,9,20,0.2)' : '#fee2e2' }]}>
+                <Feather name="user" size={16} color="#e50914" />
+              </View>
+              <View style={styles.contactInfo}>
+                <Text style={[styles.contactName, { color: isDark ? '#ffffff' : '#0f172a' }]}>Lost Owner</Text>
+                <Text style={[styles.contactEmail, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{lostItem?.user?.name || 'Unknown'}</Text>
+                <Text style={[styles.contactEmailSmall, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{lostItem?.user?.email || 'No email'}</Text>
+              </View>
+              {!isOwnerLost && lostItem?.user && (
+                <TouchableOpacity
+                  style={styles.contactMessageButton}
+                  onPress={() => handleContact(lostItem.user_id, lostItem.user.name)}
+                >
+                  <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactMessageGradient}>
+                    <Feather name="message-circle" size={14} color="#fff" />
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            <View style={styles.divider} />
+            
+            <View style={styles.contactRow}>
+              <View style={[styles.contactAvatar, { backgroundColor: isDark ? 'rgba(46,125,50,0.2)' : '#d1fae5' }]}>
+                <Feather name="user" size={16} color="#2e7d32" />
+              </View>
+              <View style={styles.contactInfo}>
+                <Text style={[styles.contactName, { color: isDark ? '#ffffff' : '#0f172a' }]}>Finder</Text>
+                <Text style={[styles.contactEmail, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{foundItem?.user?.name || 'Unknown'}</Text>
+                <Text style={[styles.contactEmailSmall, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{foundItem?.user?.email || 'No email'}</Text>
+              </View>
+              {!isOwnerFound && foundItem?.user && (
+                <TouchableOpacity
+                  style={styles.contactMessageButton}
+                  onPress={() => handleContact(foundItem.user_id, foundItem.user.name)}
+                >
+                  <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactMessageGradient}>
+                    <Feather name="message-circle" size={14} color="#fff" />
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </Animated.View>
 
         {/* Action Buttons - Admin Only */}
         {canConfirm && (
-          <View style={styles.actionContainer}>
+          <Animated.View style={[styles.actionContainer, { opacity: fadeAnim }]}>
             <TouchableOpacity style={[styles.actionButton, styles.confirmButton]} onPress={handleConfirm}>
               <LinearGradient colors={['#2e7d32', '#1b5e20']} style={styles.actionGradient}>
                 <Feather name="check-circle" size={18} color="#fff" />
@@ -379,14 +511,65 @@ export default function MatchDetailScreen({ route, navigation }) {
                 <Text style={styles.actionButtonText}>Reject Match</Text>
               </LinearGradient>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         )}
+
+        {/* Timeline Section */}
+        <Animated.View style={[styles.timelineSection, { opacity: fadeAnim }]}>
+          <Text style={[styles.timelineTitle, { color: isDark ? '#ffffff' : '#0f172a' }]}>Timeline</Text>
+          
+          <View style={[styles.timelineCard, { 
+            backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+            borderColor: isDark ? '#333333' : '#edeef5'
+          }]}>
+            <View style={styles.timelineItem}>
+              <View style={[styles.timelineMarker, { backgroundColor: '#e50914' }]} />
+              <View style={styles.timelineContent}>
+                <Text style={[styles.timelineItemTitle, { color: isDark ? '#ffffff' : '#0f172a' }]}>Match Created</Text>
+                <Text style={[styles.timelineItemDate, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{formatDateTime(match.created_at)}</Text>
+              </View>
+            </View>
+            
+            {match.status !== 'pending' && (
+              <View style={styles.timelineItem}>
+                <View style={[styles.timelineMarker, { 
+                  backgroundColor: match.status === 'confirmed' ? '#2e7d32' : '#e50914' 
+                }]} />
+                <View style={styles.timelineContent}>
+                  <Text style={[styles.timelineItemTitle, { color: isDark ? '#ffffff' : '#0f172a' }]}>
+                    Match {match.status.toUpperCase()}
+                  </Text>
+                  <Text style={[styles.timelineItemDate, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{formatDateTime(match.updated_at)}</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </Animated.View>
+
+        {/* Quick Actions Footer */}
+        <Animated.View style={[styles.quickActions, { opacity: fadeAnim }]}>
+          <TouchableOpacity 
+            style={[styles.quickActionBtn, styles.quickActionLost]}
+            onPress={() => navigation.navigate('ItemDetail', { type: 'lost', id: lostItem?.id })}
+          >
+            <Feather name="search" size={16} color="#e50914" />
+            <Text style={[styles.quickActionBtnText, { color: '#e50914' }]}>View Lost Item</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.quickActionBtn, styles.quickActionFound]}
+            onPress={() => navigation.navigate('ItemDetail', { type: 'found', id: foundItem?.id })}
+          >
+            <Feather name="check-circle" size={16} color="#2e7d32" />
+            <Text style={[styles.quickActionBtnText, { color: '#2e7d32' }]}>View Found Item</Text>
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* Footer Info */}
         <View style={[styles.footerInfo, { borderTopColor: isDark ? '#333333' : '#e2e8f0' }]}>
-          <Feather name="calendar" size={12} color={isDark ? '#666666' : '#94a3b8'} />
+          <Feather name="info" size={12} color={isDark ? '#666666' : '#94a3b8'} />
           <Text style={[styles.footerText, { color: isDark ? '#b3b3b3' : '#94a3b8' }]}>
-            Match created on {match.created_at ? new Date(match.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Unknown date'}
+            Only administrators can confirm or reject matches
           </Text>
         </View>
       </ScrollView>
@@ -489,11 +672,42 @@ const getStyles = (isDark) => StyleSheet.create({
     backgroundColor: isDark ? '#333333' : '#e2e8f0',
     borderRadius: 4,
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   scoreFill: {
     height: '100%',
     borderRadius: 4,
+  },
+  scoreBreakdown: {
+    marginBottom: 16,
+    gap: 12,
+  },
+  scoreBreakdownItem: {
+    gap: 4,
+  },
+  scoreBreakdownLabel: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  scoreBreakdownLabelText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  scoreBreakdownValue: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  progressBar: {
+    height: 4,
+    backgroundColor: isDark ? '#333333' : '#e2e8f0',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
   },
   statusBadge: {
     alignSelf: 'flex-start',
@@ -506,62 +720,50 @@ const getStyles = (isDark) => StyleSheet.create({
     fontWeight: '600',
   },
   itemsGrid: {
-    flexDirection: 'row',
     paddingHorizontal: 16,
     gap: 16,
     marginBottom: 24,
   },
   itemCard: {
-    flex: 1,
     borderRadius: 16,
-    padding: 14,
     borderWidth: 1,
+    overflow: 'hidden',
   },
   itemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: isDark ? '#333333' : '#edeef5',
+  },
+  lostHeader: {
+    backgroundColor: isDark ? 'rgba(229,9,20,0.1)' : '#fff5f5',
+  },
+  foundHeader: {
+    backgroundColor: isDark ? 'rgba(46,125,50,0.1)' : '#f0fdf4',
   },
   itemBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    gap: 6,
   },
   lostBadge: {
-    backgroundColor: isDark ? 'rgba(229,9,20,0.2)' : '#fee2e2',
-  },
-  foundBadge: {
-    backgroundColor: isDark ? 'rgba(46,125,50,0.2)' : '#d1fae5',
-  },
-  itemBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: isDark ? '#ffffff' : '#1f2937',
-  },
-  ownerBadge: {
-    backgroundColor: isDark ? 'rgba(229,9,20,0.2)' : '#f3e8ff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  ownerBadgeText: {
-    fontSize: 9,
-    fontWeight: '600',
     color: '#e50914',
   },
+  foundBadge: {
+    color: '#2e7d32',
+  },
+  itemBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
   itemContent: {
-    flex: 1,
+    padding: 14,
   },
   imageContainer: {
     width: '100%',
-    height: 100,
+    height: 120,
     borderRadius: 12,
     overflow: 'hidden',
-    marginBottom: 10,
+    marginBottom: 12,
     backgroundColor: isDark ? '#2a2a2a' : '#f8fafc',
   },
   itemImage: {
@@ -582,48 +784,92 @@ const getStyles = (isDark) => StyleSheet.create({
     backgroundColor: isDark ? 'rgba(46,125,50,0.1)' : '#f0fdf4',
   },
   itemName: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     marginBottom: 2,
   },
   itemCategory: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   itemDetails: {
-    marginBottom: 6,
+    marginBottom: 8,
     gap: 4,
   },
   itemDetail: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   itemDetailText: {
-    fontSize: 9,
+    fontSize: 10,
     flex: 1,
   },
-  itemReporter: {
-    fontSize: 9,
-    marginBottom: 10,
-  },
-  contactButton: {
-    borderRadius: 10,
-    overflow: 'hidden',
+  descriptionSection: {
+    padding: 10,
+    borderRadius: 8,
     marginTop: 8,
   },
-  contactGradient: {
+  descriptionText: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  contactSection: {
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  contactTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  contactCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+  },
+  contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
+    gap: 12,
   },
-  contactButtonText: {
-    fontSize: 11,
+  contactAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contactInfo: {
+    flex: 1,
+  },
+  contactName: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    marginBottom: 2,
+  },
+  contactEmail: {
+    fontSize: 12,
+  },
+  contactEmailSmall: {
+    fontSize: 11,
+  },
+  contactMessageButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  contactMessageGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: isDark ? '#333333' : '#edeef5',
+    marginVertical: 12,
   },
   actionContainer: {
     flexDirection: 'row',
@@ -661,6 +907,71 @@ const getStyles = (isDark) => StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#fff',
+  },
+  timelineSection: {
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  timelineTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  timelineCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+  },
+  timelineItem: {
+    flexDirection: 'row',
+    gap: 12,
+    position: 'relative',
+  },
+  timelineMarker: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: 4,
+  },
+  timelineContent: {
+    flex: 1,
+    paddingBottom: 20,
+  },
+  timelineItemTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  timelineItemDate: {
+    fontSize: 10,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    gap: 12,
+    marginBottom: 16,
+  },
+  quickActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+    borderColor: isDark ? '#333333' : '#edeef5',
+  },
+  quickActionLost: {
+    borderColor: 'rgba(229,9,20,0.3)',
+  },
+  quickActionFound: {
+    borderColor: 'rgba(46,125,50,0.3)',
+  },
+  quickActionBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   footerInfo: {
     flexDirection: 'row',

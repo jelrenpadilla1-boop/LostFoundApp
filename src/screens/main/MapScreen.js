@@ -31,6 +31,7 @@ export default function MapScreen({ navigation }) {
     const [userLocation, setUserLocation] = useState(null);
     const [showFilters, setShowFilters] = useState(false);
     const [showList, setShowList] = useState(false);
+    const [apiError, setApiError] = useState(null);
     
     // Filter states
     const [selectedCategory, setSelectedCategory] = useState('');
@@ -55,30 +56,55 @@ export default function MapScreen({ navigation }) {
     const loadItems = async () => {
         try {
             setLoading(true);
+            setApiError(null);
             const response = await mapAPI.getItems();
-            console.log('Map items loaded:', response.data);
+            console.log('Map items response:', JSON.stringify(response.data, null, 2));
             
-            // Get all items from API response
-            const lost = (response.data.lost_items || response.data.lost || []).map(item => ({ 
-                ...item, 
-                type: 'lost',
-                latitude: item.latitude || null,
-                longitude: item.longitude || null,
-                location_name: item.location_name || item.lost_location || null
-            }));
+            if (!response.data) {
+                throw new Error('No data received from server');
+            }
             
-            const found = (response.data.found_items || response.data.found || []).map(item => ({ 
-                ...item, 
-                type: 'found',
-                latitude: item.latitude || null,
-                longitude: item.longitude || null,
-                location_name: item.location_name || item.found_location || null
-            }));
+            let lost = [];
+            let found = [];
+            
+            if (response.data.success === false) {
+                throw new Error(response.data.message || 'Failed to load map items');
+            }
+            
+            // Extract lost items with status
+            if (response.data.lost && Array.isArray(response.data.lost)) {
+                lost = response.data.lost.map(item => ({ 
+                    ...item, 
+                    type: 'lost',
+                    latitude: item.latitude || null,
+                    longitude: item.longitude || null,
+                    location_name: item.location_name || item.lost_location || null,
+                    status: item.status || 'approved'
+                }));
+            }
+            
+            // Extract found items with status
+            if (response.data.found && Array.isArray(response.data.found)) {
+                found = response.data.found.map(item => ({ 
+                    ...item, 
+                    type: 'found',
+                    latitude: item.latitude || null,
+                    longitude: item.longitude || null,
+                    location_name: item.location_name || item.found_location || null,
+                    status: item.status || 'approved'
+                }));
+            }
+            
+            console.log(`Loaded ${lost.length} lost items, ${found.length} found items`);
             
             setLostItems(lost);
             setFoundItems(found);
             
-            const allItems = [...lost, ...found];
+            // Use the 'all' array from the response if available
+            const allItems = (response.data.all && Array.isArray(response.data.all)) 
+                ? response.data.all 
+                : [...lost, ...found];
+            
             setItems(allItems);
             
             // Extract unique categories
@@ -89,6 +115,8 @@ export default function MapScreen({ navigation }) {
             const withCoords = allItems.filter(item => item.latitude && item.longitude).length;
             const needsGeocoding = allItems.filter(item => (!item.latitude || !item.longitude) && item.location_name).length;
             
+            console.log(`Items with coordinates: ${withCoords}, Needs geocoding: ${needsGeocoding}`);
+            
             // Update stats
             setStats({
                 lostCount: lost.length,
@@ -98,10 +126,15 @@ export default function MapScreen({ navigation }) {
                 needsGeocoding: needsGeocoding
             });
             
+            if (allItems.length === 0) {
+                setApiError('No items with location data found. Items need to have a location to appear on the map.');
+            }
+            
             generateMapHTML(allItems);
         } catch (error) {
             console.error('Error loading map items:', error);
-            Alert.alert('Error', 'Failed to load map items');
+            setApiError(error.response?.data?.message || error.message || 'Failed to load map items');
+            Alert.alert('Error', apiError || 'Failed to load map items');
             setLoading(false);
         }
     };
@@ -126,6 +159,34 @@ export default function MapScreen({ navigation }) {
         }
     };
 
+    const getStatusColor = (status) => {
+        const colors = {
+            approved: '#22c55e',
+            claimed: '#3b82f6',
+            returned: '#8b5cf6',
+            found: '#eab308',
+            recovered: '#10b981',
+            disposed: '#6b7280',
+            pending: '#f59e0b',
+            rejected: '#ef4444'
+        };
+        return colors[status] || '#6b7280';
+    };
+
+    const getStatusLabel = (status) => {
+        const labels = {
+            approved: 'Approved',
+            claimed: 'Claimed',
+            returned: 'Returned',
+            found: 'Found',
+            recovered: 'Recovered',
+            disposed: 'Disposed',
+            pending: 'Pending',
+            rejected: 'Rejected'
+        };
+        return labels[status] || status || 'Unknown';
+    };
+
     const generateMapHTML = (allItems) => {
         // Filter items based on current filters
         const filteredItems = allItems.filter(item => {
@@ -134,6 +195,8 @@ export default function MapScreen({ navigation }) {
             if (selectedCategory && item.category !== selectedCategory) return false;
             return true;
         });
+        
+        console.log(`Filtered items: ${filteredItems.length} (Lost: ${showLost}, Found: ${showFound}, Category: ${selectedCategory || 'All'})`);
         
         // Separate items with coordinates vs items that need geocoding
         const itemsWithCoords = filteredItems.filter(item => item.latitude && item.longitude);
@@ -151,7 +214,8 @@ export default function MapScreen({ navigation }) {
             category: escapeForJS(item.category || 'Uncategorized'),
             description: escapeForJS(item.description?.substring(0, 100) || 'No description'),
             locationName: escapeForJS(item.location_name || ''),
-            photo: item.photo || ''
+            photo: item.photo || '',
+            status: item.status || 'approved'
         }));
         
         // Build geocode array for items needing geocoding
@@ -162,7 +226,8 @@ export default function MapScreen({ navigation }) {
             category: escapeForJS(item.category || 'Uncategorized'),
             description: escapeForJS(item.description?.substring(0, 100) || 'No description'),
             locationName: escapeForJS(item.location_name || ''),
-            photo: item.photo || ''
+            photo: item.photo || '',
+            status: item.status || 'approved'
         }));
 
         // Center map on user location or default to Philippines
@@ -170,11 +235,16 @@ export default function MapScreen({ navigation }) {
         const centerLng = userLocation?.lng || 124.2000;
         const zoom = userLocation ? 13 : 10;
 
+        const noItemsMessage = (markersArray.length === 0 && geocodeArray.length === 0) 
+            ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;z-index:1000;background:#2a2a2a;padding:20px;border-radius:12px;color:white;"><i class="fas fa-map-marker-alt" style="font-size:48px;margin-bottom:16px;"></i><p>No items found</p><p style="font-size:12px;color:#888;">Items need to have a location</p></div>'
+            : '';
+
         const html = `<!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a1a; margin: 0; padding: 0; }
@@ -207,14 +277,29 @@ export default function MapScreen({ navigation }) {
         #geocodeProgressText { font-size: 11px; color: #ccc; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .custom-marker { display: flex; align-items: center; justify-content: center; }
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 9px;
+            font-weight: 700;
+            margin-left: 8px;
+        }
+        .status-approved { background: rgba(34,197,94,0.2); color: #22c55e; }
+        .status-claimed { background: rgba(59,130,246,0.2); color: #3b82f6; }
+        .status-returned { background: rgba(139,92,246,0.2); color: #8b5cf6; }
+        .status-found { background: rgba(234,179,8,0.2); color: #eab308; }
+        .status-recovered { background: rgba(16,185,129,0.2); color: #10b981; }
+        .status-disposed { background: rgba(107,114,128,0.2); color: #6b7280; }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    ${noItemsMessage}
     <div id="loading">
         <div class="spinner"></div>
         <p style="margin-top: 10px; color: #ccc;">Loading map...</p>
-        <p style="margin-top: 5px; font-size: 11px; color: #888;" id="loadingDetail">${itemsWithCoords.length} with coords, ${itemsToGeocode.length} to geocode</p>
+        <p style="margin-top: 5px; font-size: 11px; color: #888;" id="loadingDetail">${markersArray.length} with coords, ${geocodeArray.length} to geocode</p>
     </div>
     <div id="geocodeProgress">
         <div id="geocodeProgressBar"><div id="geocodeProgressFill"></div></div>
@@ -245,9 +330,12 @@ export default function MapScreen({ navigation }) {
             const queries = [trimmed];
             const lower = trimmed.toLowerCase();
             if (!lower.includes('philippines')) queries.push(trimmed + ', Philippines');
+            if (!lower.includes('bohol')) queries.push(trimmed + ', Bohol, Philippines');
+            if (!lower.includes('cebu')) queries.push(trimmed + ', Cebu, Philippines');
             
             for (const query of queries) {
                 try {
+                    await new Promise(r => setTimeout(r, 1000));
                     const url = 'https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(query) + '&limit=1';
                     const response = await fetch(url, { headers: { 'Accept-Language': 'en' } });
                     if (!response.ok) continue;
@@ -255,14 +343,24 @@ export default function MapScreen({ navigation }) {
                     if (data && data.length > 0) {
                         const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
                         geocodeCache[trimmed] = result;
+                        console.log('Geocoded: ' + trimmed + ' -> ' + result.lat + ', ' + result.lng);
                         return result;
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error('Geocode error for ' + query + ':', e);
+                }
             }
+            console.warn('Could not geocode: ' + trimmed);
             return null;
         }
         
         function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+        
+        function getStatusBadgeHtml(status) {
+            const statusClass = 'status-' + status;
+            const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+            return '<span class="status-badge ' + statusClass + '">' + statusLabel + '</span>';
+        }
         
         function createMarkerIcon(type) {
             const color = type === 'lost' ? '#ef4444' : '#10b981';
@@ -280,23 +378,32 @@ export default function MapScreen({ navigation }) {
             const color = type === 'lost' ? '#ef4444' : '#10b981';
             const locationText = item.locationName || lat.toFixed(5) + ', ' + lng.toFixed(5);
             const photoHtml = item.photo ? '<img src="' + item.photo + '" style="width:100%;border-radius:8px;margin-bottom:12px;max-height:120px;object-fit:cover;" onerror="this.style.display=\\'none\\'">' : '';
+            const statusBadge = getStatusBadgeHtml(item.status);
             
             return '<div style="padding:16px;min-width:260px;max-width:310px;font-family:-apple-system,sans-serif;">' +
-                '<h6 style="font-size:15px;font-weight:700;margin:0 0 6px;color:#1a1a1a;">' + item.name + '</h6>' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">' +
+                '<h6 style="font-size:15px;font-weight:700;margin:0;color:#1a1a1a;">' + escapeHtml(item.name) + '</h6>' +
+                statusBadge +
+                '</div>' +
                 '<span style="display:inline-block;margin-bottom:10px;padding:2px 10px;border-radius:20px;font-size:10px;font-weight:800;background:' + color + '18;color:' + color + ';">' + type.toUpperCase() + '</span>' +
-                '<p style="margin:0 0 6px;font-size:12px;color:#444;"><strong>Category:</strong> ' + item.category + '</p>' +
-                '<p style="margin:0 0 10px;font-size:12px;color:#555;"><span>📍</span> ' + locationText + '</p>' +
-                '<p style="margin:0 0 12px;line-height:1.5;font-size:12px;color:#555;">' + item.description + '</p>' +
+                '<p style="margin:0 0 6px;font-size:12px;color:#444;"><strong>Category:</strong> ' + escapeHtml(item.category) + '</p>' +
+                '<p style="margin:0 0 10px;font-size:12px;color:#555;"><span>📍</span> ' + escapeHtml(locationText) + '</p>' +
+                '<p style="margin:0 0 12px;line-height:1.5;font-size:12px;color:#555;">' + escapeHtml(item.description) + '</p>' +
                 photoHtml +
                 '<button onclick="window.ReactNativeWebView.postMessage(\\'item:' + item.id + ':' + type + '\\')" style="display:flex;align-items:center;justify-content:center;width:100%;padding:10px;border-radius:8px;border:none;font-size:12px;font-weight:700;background:#e50914;color:#fff;cursor:pointer;">View Details</button>' +
                 '</div>';
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
         
         function placeMarker(item, lat, lng) {
             const icon = createMarkerIcon(item.type);
             const marker = L.marker([lat, lng], { icon }).addTo(map);
             marker.bindPopup(createPopupContent(item, item.type, lat, lng));
-            markers.push({ marker, type: item.type, category: item.category, id: item.id, lat, lng });
+            markers.push({ marker, type: item.type, category: item.category, id: item.id, lat, lng, status: item.status });
             return marker;
         }
         
@@ -323,6 +430,7 @@ export default function MapScreen({ navigation }) {
                 
                 if (geocodeData.length > 0) {
                     document.getElementById('geocodeProgress').style.display = 'flex';
+                    let geocoded = 0;
                     for (let i = 0; i < geocodeData.length; i++) {
                         const item = geocodeData[i];
                         const progress = Math.round(((i + 1) / geocodeData.length) * 100);
@@ -330,10 +438,14 @@ export default function MapScreen({ navigation }) {
                         document.getElementById('geocodeProgressText').textContent = 'Locating... (' + (i + 1) + '/' + geocodeData.length + ')';
                         
                         const pos = await geocodeAddress(item.locationName);
-                        if (pos) placeMarker(item, pos.lat, pos.lng);
+                        if (pos) {
+                            placeMarker(item, pos.lat, pos.lng);
+                            geocoded++;
+                        }
                         if (i < geocodeData.length - 1) await sleep(1000);
                     }
                     document.getElementById('geocodeProgress').style.display = 'none';
+                    console.log('Geocoded ' + geocoded + ' of ' + geocodeData.length + ' items');
                 }
                 
                 document.getElementById('loading').style.display = 'none';
@@ -343,11 +455,14 @@ export default function MapScreen({ navigation }) {
                     markers.forEach(m => bounds.extend([m.lat, m.lng]));
                     if (userMarker) bounds.extend([userLocation.lat, userLocation.lng]);
                     map.fitBounds(bounds, { padding: [30, 30] });
+                } else {
+                    map.setView([${centerLat}, ${centerLng}], ${zoom});
                 }
                 
                 window.ReactNativeWebView.postMessage('map:ready');
             } catch (error) {
-                document.getElementById('loading').innerHTML = '<p style="color: #ef4444;">Map failed to load</p>';
+                console.error('Init map error:', error);
+                document.getElementById('loading').innerHTML = '<p style="color: #ef4444;">Map failed to load: ' + error.message + '</p>';
                 window.ReactNativeWebView.postMessage('error:Map init failed');
             }
         }
@@ -372,6 +487,8 @@ export default function MapScreen({ navigation }) {
                 markers.forEach(m => bounds.extend([m.lat, m.lng]));
                 if (userMarker) bounds.extend([userLocation.lat, userLocation.lng]);
                 map.fitBounds(bounds, { padding: [30, 30] });
+            } else {
+                map.setView([${centerLat}, ${centerLng}], ${zoom});
             }
         };
     </script>
@@ -452,9 +569,14 @@ export default function MapScreen({ navigation }) {
                         {item.type === 'lost' ? 'LOST' : 'FOUND'}
                     </Text>
                 </View>
-                <Text style={styles.listItemCategory}>{item.category?.toUpperCase() || 'UNCATEGORIZED'}</Text>
+                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
+                    <Text style={[styles.statusBadgeText, { color: getStatusColor(item.status) }]}>
+                        {getStatusLabel(item.status).toUpperCase()}
+                    </Text>
+                </View>
             </View>
             <Text style={styles.listItemTitle}>{item.item_name}</Text>
+            <Text style={styles.listItemCategory}>{item.category?.toUpperCase() || 'UNCATEGORIZED'}</Text>
             {item.location_name && (
                 <View style={styles.listItemLocation}>
                     <Icon name="location-outline" size={12} color="#666" />
@@ -563,7 +685,7 @@ export default function MapScreen({ navigation }) {
                             </View>
                             <View style={styles.statsNote}>
                                 <Icon name="checkmark-circle" size={12} color="#2e7d32" />
-                                <Text style={styles.statsNoteText}>Only approved items are shown</Text>
+                                <Text style={styles.statsNoteText}>All items except pending/rejected are shown</Text>
                             </View>
                         </View>
                     </ScrollView>
@@ -637,26 +759,6 @@ export default function MapScreen({ navigation }) {
             <View style={styles.center}>
                 <ActivityIndicator size="large" color="#e50914" />
                 <Text style={styles.loadingText}>Loading map...</Text>
-            </View>
-        );
-    }
-
-    const hasItems = items.length > 0;
-
-    if (!hasItems) {
-        return (
-            <View style={styles.center}>
-                <Icon name="map-outline" size={64} color="#ccc" />
-                <Text style={styles.emptyTitle}>No items on map</Text>
-                <Text style={styles.emptyText}>
-                    Items with location data will appear here
-                </Text>
-                <TouchableOpacity 
-                    style={styles.reportButton}
-                    onPress={() => navigation?.navigate('CreateItem', { type: 'lost' })}
-                >
-                    <Text style={styles.reportButtonText}>Report an Item</Text>
-                </TouchableOpacity>
             </View>
         );
     }
@@ -1030,16 +1132,26 @@ const styles = StyleSheet.create({
     foundBadgeText: {
         color: '#10b981',
     },
+    statusBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    statusBadgeText: {
+        fontSize: 9,
+        fontWeight: '700',
+    },
     listItemCategory: {
         fontSize: 10,
         fontWeight: '600',
         color: '#999',
+        marginBottom: 6,
     },
     listItemTitle: {
         fontSize: 16,
         fontWeight: '600',
         color: '#1e1b2f',
-        marginBottom: 8,
+        marginBottom: 6,
     },
     listItemLocation: {
         flexDirection: 'row',

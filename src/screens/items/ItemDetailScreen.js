@@ -22,6 +22,7 @@ import {
 import MapView, { Marker } from 'react-native-maps';
 import { foundItemsAPI, lostItemsAPI } from '../../api/items';
 import { matchesAPI } from '../../api/matches';
+import { messagesAPI } from '../../api/messages';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -43,6 +44,7 @@ export default function ItemDetailScreen({ route, navigation }) {
   const [rejectionReason, setRejectionReason] = useState('');
   const [claimDetails, setClaimDetails] = useState('');
   const [imageError, setImageError] = useState(false);
+  const [startingChat, setStartingChat] = useState(false);
   const { user, isAdmin, logout } = useAuth();
   const { isDark } = useTheme();
 
@@ -215,7 +217,7 @@ export default function ItemDetailScreen({ route, navigation }) {
     );
   };
 
-  // FIXED: Mark as Claimed for Found Items - Using dedicated endpoint
+  // Mark as Claimed for Found Items
   const handleMarkAsClaimed = async () => {
     if (!claimDetails.trim()) {
       Alert.alert('Error', 'Please provide claim details');
@@ -236,7 +238,6 @@ export default function ItemDetailScreen({ route, navigation }) {
               setUpdating(true);
               console.log(`Marking found item ${id} as claimed`);
               
-              // Use the dedicated markAsClaimed endpoint
               const response = await foundItemsAPI.markAsClaimed(id, claimDetails);
               
               console.log('Mark as claimed response:', response.data);
@@ -262,7 +263,7 @@ export default function ItemDetailScreen({ route, navigation }) {
     );
   };
 
-  // FIXED: Mark as Found for Lost Items - Using dedicated endpoint
+  // Mark as Found for Lost Items
   const handleMarkAsFound = async () => {
     Alert.alert(
       'Mark as Found',
@@ -278,7 +279,6 @@ export default function ItemDetailScreen({ route, navigation }) {
               setUpdating(true);
               console.log(`Marking lost item ${id} as found`);
               
-              // Use the dedicated markAsFound endpoint
               const response = await lostItemsAPI.markAsFound(id);
               
               console.log('Mark as found response:', response.data);
@@ -364,6 +364,52 @@ export default function ItemDetailScreen({ route, navigation }) {
     );
   };
 
+  // FIXED: Handle sending message to item owner/finder
+  const handleSendMessage = async () => {
+    if (!item?.user) {
+      Alert.alert('Error', 'User information not available');
+      return;
+    }
+    
+    if (startingChat) return;
+    
+    setStartingChat(true);
+    
+    try {
+      console.log('Starting conversation with user:', item.user.id);
+      const startResponse = await messagesAPI.startConversation(item.user.id);
+      console.log('Start conversation response:', startResponse.data);
+      
+      let conversationId = null;
+      if (startResponse.data?.data?.id) {
+        conversationId = startResponse.data.data.id;
+      } else if (startResponse.data?.conversation?.id) {
+        conversationId = startResponse.data.conversation.id;
+      } else if (startResponse.data?.id) {
+        conversationId = startResponse.data.id;
+      } else if (startResponse.data?.conversation_id) {
+        conversationId = startResponse.data.conversation_id;
+      }
+      
+      if (conversationId) {
+        navigation.navigate('Chat', { 
+          conversationId: conversationId,
+          userId: item.user.id,
+          userName: item.user.name,
+          userEmail: item.user.email
+        });
+      } else {
+        Alert.alert('Error', 'Could not start conversation. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error starting conversation:', error);
+      console.error('Error response:', error.response?.data);
+      Alert.alert('Error', error.response?.data?.message || 'Failed to start conversation. Please try again.');
+    } finally {
+      setStartingChat(false);
+    }
+  };
+
   const getStatusConfig = (status) => {
     const configs = {
       pending: { color: '#f59e0b', bg: '#fef3c7', icon: 'clock', label: 'Pending' },
@@ -393,19 +439,6 @@ export default function ItemDetailScreen({ route, navigation }) {
       const url = `https://maps.google.com/?q=${encodeURIComponent(location)}`;
       Linking.openURL(url);
     }
-  };
-
-  const handleSendMessage = () => {
-    if (!item?.user) {
-      Alert.alert('Error', 'User information not available');
-      return;
-    }
-    
-    navigation.navigate('Chat', { 
-      userId: item.user.id,
-      userName: item.user.name,
-      userEmail: item.user.email
-    });
   };
 
   const styles = getStyles(isDark);
@@ -459,6 +492,8 @@ export default function ItemDetailScreen({ route, navigation }) {
   const showActions = (item.status === 'pending' && (isAdmin || isOwner)) ||
                       (item.status === 'approved' && isOwner) ||
                       isAdmin;
+  // Show contact button for non-owners when item is approved
+  const showContactButton = !isOwner && item.status === 'approved' && item.user && item.user.id !== user?.id;
 
   const latFormatted = formatCoordinate(item?.latitude);
   const lngFormatted = formatCoordinate(item?.longitude);
@@ -474,7 +509,7 @@ export default function ItemDetailScreen({ route, navigation }) {
           colors={isDark ? ['#1a1a1a', '#141414'] : ['#ffffff', '#faf9fe']}
           style={styles.header}
         >
-         
+          {/* Header content removed as it was empty */}
         </LinearGradient>
 
         {/* Image Section */}
@@ -700,7 +735,7 @@ export default function ItemDetailScreen({ route, navigation }) {
                 {canDelete && (
                   <TouchableOpacity
                     style={[styles.actionButton, styles.deleteButton]}
-                    onPress={handleDelete}
+                    onPress={() => setDeleteModalVisible(true)}
                     disabled={deleting}
                   >
                     {deleting ? (
@@ -714,6 +749,30 @@ export default function ItemDetailScreen({ route, navigation }) {
                   </TouchableOpacity>
                 )}
               </View>
+            </View>
+          )}
+
+          {/* Contact Button - For non-owners to message the item owner/finder */}
+          {showContactButton && (
+            <View style={styles.section}>
+              <TouchableOpacity
+                style={styles.contactNowButton}
+                onPress={handleSendMessage}
+                disabled={startingChat}
+              >
+                <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactNowGradient}>
+                  {startingChat ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Feather name="message-circle" size={18} color="#fff" />
+                      <Text style={styles.contactNowButtonText}>
+                        {type === 'lost' ? 'Contact Finder' : 'Contact Owner'}
+                      </Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -782,97 +841,6 @@ export default function ItemDetailScreen({ route, navigation }) {
                   </TouchableOpacity>
                 );
               })}
-            </View>
-          )}
-
-          {/* Contact Card - Found Items */}
-          {(type === 'found' && (item.status !== 'pending' || isAdmin || isOwner)) && (
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Contact Finder</Text>
-              <View style={[styles.contactCard, { 
-                backgroundColor: isDark ? '#1a1a1a' : '#fff',
-                borderColor: isDark ? '#333333' : '#edeef5'
-              }]}>
-                <View style={[styles.contactProfile, { borderBottomColor: isDark ? '#333333' : '#edeef5' }]}>
-                  <View style={styles.contactAvatar}>
-                    <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactAvatarGradient}>
-                      <Text style={styles.contactAvatarText}>
-                        {item.user?.name?.charAt(0).toUpperCase() || '?'}
-                      </Text>
-                    </LinearGradient>
-                  </View>
-                  <View style={styles.contactDetails}>
-                    <Text style={[styles.contactName, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{item.user?.name || 'Unknown User'}</Text>
-                    <Text style={[styles.contactRole, { color: '#e50914' }]}>
-                      {item.user?.isAdmin ? 'Admin' : 'Member'}
-                      {item.user_id === user?.id && <Text style={[styles.youIndicator, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}> (you)</Text>}
-                    </Text>
-                  </View>
-                </View>
-                
-                <View style={styles.contactInfoList}>
-                  <View style={[styles.contactInfoItem, { borderBottomColor: isDark ? '#333333' : '#edeef5' }]}>
-                    <Feather name="mail" size={14} color="#e50914" />
-                    <Text style={[styles.contactInfoText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>{item.user?.email}</Text>
-                  </View>
-                </View>
-                
-                {!isOwner && !isAdmin && item.user && item.user.id !== user?.id && (
-                  <TouchableOpacity
-                    style={styles.messageButton}
-                    onPress={handleSendMessage}
-                  >
-                    <LinearGradient colors={['#e50914', '#b20710']} style={styles.messageButtonGradient}>
-                      <Feather name="message-circle" size={16} color="#fff" />
-                      <Text style={styles.messageButtonText}>Send Message</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          )}
-
-          {/* Contact Card - Lost Items (for non-owners) */}
-          {(type === 'lost' && (item.status !== 'pending' || isAdmin || isOwner) && !isOwner && !isAdmin && item.user && item.user.id !== user?.id) && (
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Contact Owner</Text>
-              <View style={[styles.contactCard, { 
-                backgroundColor: isDark ? '#1a1a1a' : '#fff',
-                borderColor: isDark ? '#333333' : '#edeef5'
-              }]}>
-                <View style={[styles.contactProfile, { borderBottomColor: isDark ? '#333333' : '#edeef5' }]}>
-                  <View style={styles.contactAvatar}>
-                    <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactAvatarGradient}>
-                      <Text style={styles.contactAvatarText}>
-                        {item.user?.name?.charAt(0).toUpperCase() || '?'}
-                      </Text>
-                    </LinearGradient>
-                  </View>
-                  <View style={styles.contactDetails}>
-                    <Text style={[styles.contactName, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{item.user?.name || 'Unknown User'}</Text>
-                    <Text style={[styles.contactRole, { color: '#e50914' }]}>
-                      {item.user?.isAdmin ? 'Admin' : 'Member'}
-                    </Text>
-                  </View>
-                </View>
-                
-                <View style={styles.contactInfoList}>
-                  <View style={[styles.contactInfoItem, { borderBottomColor: isDark ? '#333333' : '#edeef5' }]}>
-                    <Feather name="mail" size={14} color="#e50914" />
-                    <Text style={[styles.contactInfoText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>{item.user?.email}</Text>
-                  </View>
-                </View>
-                
-                <TouchableOpacity
-                  style={styles.messageButton}
-                  onPress={handleSendMessage}
-                >
-                  <LinearGradient colors={['#e50914', '#b20710']} style={styles.messageButtonGradient}>
-                    <Feather name="message-circle" size={16} color="#fff" />
-                    <Text style={styles.messageButtonText}>Send Message</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
             </View>
           )}
 
@@ -1442,6 +1410,23 @@ const getStyles = (isDark) => StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  contactNowButton: {
+    borderRadius: 40,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  contactNowGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+  },
+  contactNowButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   matchesBadge: {
     backgroundColor: '#e50914',
     paddingHorizontal: 10,
@@ -1534,82 +1519,6 @@ const getStyles = (isDark) => StyleSheet.create({
     fontSize: 9,
     fontWeight: '600',
     color: '#fff',
-  },
-  contactCard: {
-    borderRadius: 20,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  contactProfile: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    padding: 20,
-    borderBottomWidth: 1,
-  },
-  contactAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  contactAvatarGradient: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  contactAvatarText: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  contactDetails: {
-    flex: 1,
-  },
-  contactName: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  contactRole: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  youIndicator: {
-    fontSize: 10,
-  },
-  contactInfoList: {
-    paddingHorizontal: 20,
-  },
-  contactInfoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-  },
-  contactInfoText: {
-    fontSize: 13,
-    flex: 1,
-  },
-  messageButton: {
-    margin: 20,
-    marginTop: 0,
-    borderRadius: 40,
-    overflow: 'hidden',
-  },
-  messageButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-  },
-  messageButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
   },
   locationRow: {
     flexDirection: 'row',
@@ -1772,4 +1681,3 @@ const getStyles = (isDark) => StyleSheet.create({
     fontWeight: '600',
   },
 });
-
