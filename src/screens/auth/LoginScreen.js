@@ -1,485 +1,473 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useState } from 'react';
+import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  useColorScheme,
   View
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [focusedField, setFocusedField] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
   const { login } = useAuth();
-  const colorScheme = useColorScheme();
-
-  // Load saved theme preference on mount
-  useEffect(() => {
-    loadThemePreference();
-  }, []);
-
-  const loadThemePreference = async () => {
-    try {
-      const savedTheme = await AsyncStorage.getItem('foundify-theme');
-      if (savedTheme === 'dark') {
-        setIsDarkMode(true);
-      } else if (savedTheme === 'light') {
-        setIsDarkMode(false);
-      } else {
-        // Use system preference
-        setIsDarkMode(colorScheme === 'dark');
-      }
-    } catch (error) {
-      console.log('Error loading theme:', error);
-    }
-  };
-
-  const toggleTheme = async () => {
-    const newTheme = !isDarkMode;
-    setIsDarkMode(newTheme);
-    try {
-      await AsyncStorage.setItem('foundify-theme', newTheme ? 'dark' : 'light');
-    } catch (error) {
-      console.log('Error saving theme:', error);
-    }
-  };
+  const { isDark, toggleTheme } = useTheme();
 
   const handleLogin = async () => {
+    setErrorMessage('');
+    
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      setErrorMessage('Please fill in all fields');
       return;
     }
-
-    // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      Alert.alert('Error', 'Please enter a valid email address');
+      setErrorMessage('Please enter a valid email address');
       return;
     }
-
+    
     setLoading(true);
     const result = await login(email, password);
     setLoading(false);
-
+    
     if (!result.success) {
-      Alert.alert('Login Failed', result.error);
+      setErrorMessage('Invalid email or password. Please try again.');
     }
   };
 
-  const styles = getStyles(isDarkMode);
+  const s = getStyles(isDark);
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <View style={s.root}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
+
         <ScrollView
+          style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
         >
-          {/* Dark Mode Toggle */}
-          <View style={styles.themeToggleWrapper}>
-            <TouchableOpacity
-              style={styles.themeToggleBtn}
-              onPress={toggleTheme}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.themeIcon}>
-                {isDarkMode ? '☀️' : '🌙'}
+          {/* ── Top Nav (matching Landing Page) ── */}
+          <View style={[styles.nav, { paddingTop: Platform.OS === 'ios' ? 56 : 44 }]}>
+            <TouchableOpacity style={styles.navBrand} activeOpacity={0.7} onPress={() => navigation.navigate('Landing')}>
+              <Feather name="compass" size={24} color="#e50914" />
+              <Text style={[styles.navLogo, { color: isDark ? '#ffffff' : '#1a1a1a' }]}>
+                Found<Text style={styles.navLogoAccent}>ify</Text>
               </Text>
             </TouchableOpacity>
+
+            <View style={styles.navActions}>
+              <TouchableOpacity
+                style={styles.themeToggle}
+                activeOpacity={0.8}
+                onPress={toggleTheme}
+              >
+                <Feather name={isDark ? 'sun' : 'moon'} size={18} color="#e50914" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.navSignUp, { borderColor: isDark ? '#333333' : '#e0e0e0' }]}
+                activeOpacity={0.8}
+                onPress={() => navigation.navigate('Register')}
+              >
+                <Text style={[styles.navSignUpText, { color: isDark ? '#b3b3b3' : '#666666' }]}>Sign Up</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
-          {/* Logo */}
-          <View style={styles.logoWrapper}>
-            <View style={styles.logoContainer}>
-              <View style={styles.logoIcon}>
-                <Text style={styles.logoIconText}>🧭</Text>
+          {/* ── Hero Section with Gradient ── */}
+          <View style={styles.heroWrap}>
+            <LinearGradient
+              colors={isDark ? ['rgba(229,9,20,0.3)', 'transparent'] : ['rgba(229,9,20,0.08)', 'transparent']}
+              style={styles.heroGradientTop}
+            />
+            <LinearGradient
+              colors={isDark ? ['transparent', '#141414'] : ['transparent', '#f5f5f5']}
+              style={styles.heroGradientBottom}
+            />
+
+            <View style={styles.heroBlob} />
+
+            <View style={styles.heroContent}>
+              <View style={styles.heroBadge}>
+                <Feather name="star" size={11} color="#e50914" />
+                <Text style={styles.heroBadgeText}>WELCOME BACK</Text>
               </View>
-              <Text style={styles.logoText}>
-                Found<Text style={styles.logoAccent}>ify</Text>
+
+              <Text style={[styles.heroHeadline, { color: isDark ? '#ffffff' : '#1a1a1a' }]}>
+                Sign in to <Text style={styles.heroHeadlineAccent}>Foundify</Text>
+              </Text>
+              <Text style={[styles.heroSub, { color: isDark ? '#b3b3b3' : '#666666' }]}>
+                Access your matches, track lost items, and reconnect with what matters most.
               </Text>
             </View>
           </View>
 
-          {/* Form Header */}
-          <View style={styles.formHeader}>
-            <Text style={styles.formTitle}>Sign in</Text>
-            <Text style={styles.formSubtitle}>
-              Access your account to continue reuniting
-            </Text>
-          </View>
+          {/* ── Form Card (matching Landing Page feature cards) ── */}
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={[styles.formCard, { backgroundColor: isDark ? '#1a1a1a' : '#ffffff', borderColor: isDark ? '#333333' : '#e0e0e0' }]}>
+              {/* Error Message */}
+              {errorMessage ? (
+                <View style={styles.errorAlert}>
+                  <Feather name="alert-triangle" size={16} color="#e50914" />
+                  <View style={styles.errorContent}>
+                    <Text style={styles.errorTitle}>Unable to sign in</Text>
+                    <Text style={[styles.errorText, { color: isDark ? '#e5e5e5' : '#666666' }]}>{errorMessage}</Text>
+                  </View>
+                </View>
+              ) : null}
 
-          {/* Login Form */}
-          <View style={styles.form}>
-            {/* Email Input */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email address</Text>
-              <View style={styles.inputWrapper}>
-                <Text style={styles.inputIcon}>✉️</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="hello@foundify.com"
-                  placeholderTextColor={isDarkMode ? '#938bb0' : '#7e7b9a'}
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  autoComplete="email"
-                />
+              {/* Email Field */}
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.label, { color: isDark ? '#b3b3b3' : '#666666' }]}>Email Address</Text>
+                <View style={[styles.inputRow, focusedField === 'email' && styles.inputRowFocused, { borderColor: isDark ? '#333333' : '#e0e0e0', backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#fafafa' }]}>
+                  <Feather name="mail" size={18} color={focusedField === 'email' ? '#e50914' : (isDark ? '#666666' : '#999999')} style={styles.fieldIcon} />
+                  <TextInput
+                    style={[styles.textInput, { color: isDark ? '#ffffff' : '#1a1a1a' }]}
+                    placeholder="hello@foundify.com"
+                    placeholderTextColor={isDark ? '#666666' : '#999999'}
+                    value={email}
+                    onChangeText={(text) => {
+                      setEmail(text);
+                      setErrorMessage('');
+                    }}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    autoComplete="email"
+                    onFocus={() => setFocusedField('email')}
+                    onBlur={() => setFocusedField(null)}
+                  />
+                </View>
               </View>
-            </View>
 
-            {/* Password Input */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Password</Text>
-              <View style={styles.inputWrapper}>
-                <Text style={styles.inputIcon}>🔒</Text>
-                <TextInput
-                  style={[styles.input, styles.passwordInput]}
-                  placeholder="••••••••"
-                  placeholderTextColor={isDarkMode ? '#938bb0' : '#7e7b9a'}
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showPassword}
-                  autoComplete="password"
-                />
-                <TouchableOpacity
-                  style={styles.togglePassword}
-                  onPress={() => setShowPassword(!showPassword)}
-                >
-                  <Text style={styles.toggleIcon}>
-                    {showPassword ? '👁️' : '👁️‍🗨️'}
-                  </Text>
+              {/* Password Field */}
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.label, { color: isDark ? '#b3b3b3' : '#666666' }]}>Password</Text>
+                <View style={[styles.inputRow, focusedField === 'password' && styles.inputRowFocused, { borderColor: isDark ? '#333333' : '#e0e0e0', backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#fafafa' }]}>
+                  <Feather name="lock" size={18} color={focusedField === 'password' ? '#e50914' : (isDark ? '#666666' : '#999999')} style={styles.fieldIcon} />
+                  <TextInput
+                    style={[styles.textInput, styles.passwordInput, { color: isDark ? '#ffffff' : '#1a1a1a' }]}
+                    placeholder="Enter your password"
+                    placeholderTextColor={isDark ? '#666666' : '#999999'}
+                    value={password}
+                    onChangeText={(text) => {
+                      setPassword(text);
+                      setErrorMessage('');
+                    }}
+                    secureTextEntry={!showPassword}
+                    autoComplete="password"
+                    onFocus={() => setFocusedField('password')}
+                    onBlur={() => setFocusedField(null)}
+                  />
+                  <TouchableOpacity
+                    style={styles.eyeBtn}
+                    onPress={() => setShowPassword((v) => !v)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Feather name={showPassword ? 'eye' : 'eye-off'} size={18} color={isDark ? '#666666' : '#999999'} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Forgot Password */}
+              <TouchableOpacity style={styles.forgotRow} onPress={() => navigation.navigate('ForgotPassword')}>
+                <Text style={styles.forgotText}>Forgot password?</Text>
+              </TouchableOpacity>
+
+              {/* Submit Button - Matching Landing CTA */}
+              <TouchableOpacity onPress={handleLogin} disabled={loading} activeOpacity={0.88}>
+                <LinearGradient colors={['#e50914', '#b20710']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.submitBtn}>
+                  {loading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={styles.submitText}>Sign In</Text>
+                      <Feather name="chevron-right" size={18} color="#fff" />
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Sign Up Link */}
+              <View style={styles.signupRow}>
+                <Text style={[styles.signupText, { color: isDark ? '#b3b3b3' : '#666666' }]}>Don't have an account?</Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+                  <Text style={styles.signupLink}> Create account →</Text>
                 </TouchableOpacity>
               </View>
             </View>
-
-            {/* Form Options */}
-            <View style={styles.formOptions}>
-              <TouchableOpacity
-                style={styles.checkboxLabel}
-                onPress={() => setRememberMe(!rememberMe)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-                  {rememberMe && <Text style={styles.checkmark}>✓</Text>}
-                </View>
-                <Text style={styles.checkboxText}>Keep me signed in</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword')}>
-                <Text style={styles.forgotLink}>Forgot password?</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Submit Button */}
-            <TouchableOpacity
-              style={styles.submitBtn}
-              onPress={handleLogin}
-              disabled={loading}
-              activeOpacity={0.9}
-            >
-              {loading ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <>
-                  <Text style={styles.submitBtnText}>Sign in</Text>
-                  <Text style={styles.submitBtnIcon}>→</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            {/* Divider */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or continue with</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            {/* Social Buttons */}
-            <View style={styles.socialButtons}>
-              <TouchableOpacity style={styles.socialBtn}>
-                <Text style={styles.socialIcon}>G</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.socialBtn}>
-                <Text style={styles.socialIcon}>🐙</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.socialBtn}>
-                <Text style={styles.socialIcon}>🍎</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Signup Link */}
-            <View style={styles.signupLink}>
-              <Text style={styles.signupText}>Don't have an account?</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-                <Text style={styles.signupLinkText}>
-                  Create free account →
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          </KeyboardAvoidingView>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
     </TouchableWithoutFeedback>
   );
 }
 
-const getStyles = (isDarkMode: boolean) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: isDarkMode ? '#12101c' : '#faf9fe',
-    },
-    scrollContent: {
-      flexGrow: 1,
-      paddingHorizontal: 24,
-      paddingTop: Platform.OS === 'ios' ? 20 : 40,
-      paddingBottom: 40,
-    },
-    themeToggleWrapper: {
-      alignItems: 'flex-end',
-      marginBottom: 24,
-    },
-    themeToggleBtn: {
-      width: 44,
-      height: 44,
-      borderRadius: 60,
-      backgroundColor: isDarkMode ? '#2d2648' : '#ede9fe',
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    },
-    themeIcon: {
-      fontSize: 20,
-    },
-    logoWrapper: {
-      alignItems: 'center',
-      marginBottom: 28,
-    },
-    logoContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    logoIcon: {
-      width: 52,
-      height: 52,
-      borderRadius: 16,
-      backgroundColor: '#7c3aed',
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#7c3aed',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.25,
-      shadowRadius: 12,
-      elevation: 5,
-    },
-    logoIconText: {
-      fontSize: 24,
-    },
-    logoText: {
-      fontSize: 28,
-      fontWeight: '800',
-      color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-      letterSpacing: -0.5,
-    },
-    logoAccent: {
-      color: '#7c3aed',
-    },
-    formHeader: {
-      alignItems: 'center',
-      marginBottom: 28,
-    },
-    formTitle: {
-      fontSize: 32,
-      fontWeight: '800',
-      color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-      marginBottom: 8,
-    },
-    formSubtitle: {
-      fontSize: 14,
-      color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-      textAlign: 'center',
-    },
-    form: {
-      gap: 20,
-    },
-    inputGroup: {
-      gap: 8,
-    },
-    label: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-      marginLeft: 4,
-    },
-    inputWrapper: {
-      position: 'relative',
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    inputIcon: {
-      position: 'absolute',
-      left: 16,
-      zIndex: 1,
-      fontSize: 16,
-      color: isDarkMode ? '#938bb0' : '#7e7b9a',
-    },
-    input: {
-      flex: 1,
-      paddingVertical: 14,
-      paddingHorizontal: 48,
-      borderWidth: 1.5,
-      borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-      borderRadius: 16,
-      fontSize: 15,
-      backgroundColor: isDarkMode ? '#1e1a2f' : '#ffffff',
-      color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-      fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
-    },
-    passwordInput: {
-      paddingRight: 48,
-    },
-    togglePassword: {
-      position: 'absolute',
-      right: 12,
-      padding: 8,
-    },
-    toggleIcon: {
-      fontSize: 18,
-      color: isDarkMode ? '#938bb0' : '#7e7b9a',
-    },
-    formOptions: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginTop: 4,
-    },
-    checkboxLabel: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    checkbox: {
-      width: 18,
-      height: 18,
-      borderRadius: 4,
-      borderWidth: 2,
-      borderColor: isDarkMode ? '#a78bfa' : '#7c3aed',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: 'transparent',
-    },
-    checkboxChecked: {
-      backgroundColor: '#7c3aed',
-      borderColor: '#7c3aed',
-    },
-    checkmark: {
-      color: '#ffffff',
-      fontSize: 12,
-      fontWeight: 'bold',
-    },
-    checkboxText: {
-      fontSize: 13,
-      color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-    },
-    forgotLink: {
-      fontSize: 13,
-      fontWeight: '500',
-      color: '#7c3aed',
-    },
-    submitBtn: {
-      backgroundColor: '#7c3aed',
-      borderRadius: 60,
-      paddingVertical: 16,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 10,
-      marginTop: 8,
-      shadowColor: '#7c3aed',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
-      shadowRadius: 14,
-      elevation: 5,
-    },
-    submitBtnText: {
-      color: '#ffffff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    submitBtnIcon: {
-      color: '#ffffff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    divider: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginVertical: 8,
-    },
-    dividerLine: {
-      flex: 1,
-      height: 1,
-      backgroundColor: isDarkMode ? '#2a2438' : '#edeef5',
-    },
-    dividerText: {
-      marginHorizontal: 16,
-      fontSize: 12,
-      color: isDarkMode ? '#938bb0' : '#7e7b9a',
-      textTransform: 'uppercase',
-    },
-    socialButtons: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      gap: 16,
-    },
-    socialBtn: {
-      width: 52,
-      height: 52,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-      backgroundColor: isDarkMode ? '#191624' : '#ffffff',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    socialIcon: {
-      fontSize: 24,
-      color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-    },
-    signupLink: {
-      alignItems: 'center',
-      paddingTop: 20,
-      borderTopWidth: 1,
-      borderTopColor: isDarkMode ? '#2a2438' : '#edeef5',
-      gap: 6,
-    },
-    signupText: {
-      fontSize: 13,
-      color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-    },
-    signupLinkText: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: '#7c3aed',
-    },
-  });
+const styles = StyleSheet.create({
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+
+  /* ── Nav (matching Landing) ── */
+  nav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingBottom: 8,
+    zIndex: 10,
+  },
+  navBrand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  navLogo: {
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+  },
+  navLogoAccent: {
+    color: '#e50914',
+  },
+  navActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  themeToggle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(229,9,20,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navSignUp: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  navSignUpText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  /* ── Hero (matching Landing) ── */
+ heroWrap: {
+  minHeight: 220,        // was 340
+  justifyContent: 'center',
+  alignItems: 'center',
+  paddingHorizontal: 24,
+  paddingTop: 8,         // was 20
+  paddingBottom: 20,     // was 40
+  overflow: 'hidden',
+},
+  heroGradientTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+  },
+  heroGradientBottom: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 100,
+  },
+  heroBlob: {
+    position: 'absolute',
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: 'rgba(229,9,20,0.08)',
+    top: -20,
+    alignSelf: 'center',
+  },
+  heroContent: {
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  heroBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(229,9,20,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,9,20,0.4)',
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginBottom: 24,
+  },
+  heroBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#e50914',
+    letterSpacing: 1,
+  },
+  heroHeadline: {
+    fontSize: 34,
+    fontWeight: '900',
+    textAlign: 'center',
+    letterSpacing: -1,
+    lineHeight: 42,
+    marginBottom: 16,
+  },
+  heroHeadlineAccent: {
+    color: '#e50914',
+  },
+  heroSub: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 22,
+    maxWidth: 280,
+  },
+
+  /* ── Form Card (matching Landing feature cards) ── */
+  formCard: {
+    marginHorizontal: 24,
+    padding: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+
+  /* ── Error Alert ── */
+  errorAlert: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: 'rgba(229,9,20,0.1)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#e50914',
+    padding: 12,
+    borderRadius: 4,
+    marginBottom: 20,
+  },
+  errorContent: {
+    flex: 1,
+  },
+  errorTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#e50914',
+    marginBottom: 4,
+  },
+  errorText: {
+    fontSize: 11,
+  },
+
+  /* ── Fields ── */
+  fieldGroup: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 14,
+    height: 52,
+  },
+  inputRowFocused: {
+    borderColor: '#e50914',
+    borderWidth: 2,
+  },
+  fieldIcon: {
+    marginRight: 10,
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 15,
+    height: '100%',
+  },
+  passwordInput: {
+    paddingRight: 36,
+  },
+  eyeBtn: {
+    position: 'absolute',
+    right: 14,
+  },
+
+  /* ── Forgot ── */
+  forgotRow: {
+    alignSelf: 'flex-end',
+    marginBottom: 28,
+  },
+  forgotText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#e50914',
+  },
+
+  /* ── Submit Button (matching Landing CTA) ── */
+  submitBtn: {
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 4,
+  },
+  submitText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  /* ── Sign Up Link ── */
+  signupRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  signupText: {
+    fontSize: 14,
+  },
+  signupLink: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#e50914',
+  },
+});
+
+const getStyles = (isDark) => StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: isDark ? '#141414' : '#f5f5f5',
+  },
+});

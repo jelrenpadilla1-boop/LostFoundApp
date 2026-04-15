@@ -11,14 +11,8 @@ export const lostItemsAPI = {
     });
   },
   update: (id, data) => {
-    const formData = new FormData();
-    Object.keys(data).forEach(key => {
-      if (data[key] !== null && data[key] !== undefined) {
-        formData.append(key, data[key]);
-      }
-    });
-    formData.append('_method', 'PUT');
-    return api.post(`/lost-items/${id}`, formData, {
+    // Use POST with _method=PUT to handle file uploads properly
+    return api.post(`/lost-items/${id}`, data, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
   },
@@ -26,6 +20,8 @@ export const lostItemsAPI = {
   approve: (id) => api.post(`/lost-items/${id}/approve`),
   reject: (id, reason) => api.post(`/lost-items/${id}/reject`, { rejection_reason: reason }),
   getPendingCount: () => api.get('/lost-items/pending/count'),
+  // NEW: Mark a lost item as found (owner action)
+  markAsFound: (id) => api.post(`/lost-items/${id}/mark-as-found`),
 };
 
 export const foundItemsAPI = {
@@ -38,14 +34,8 @@ export const foundItemsAPI = {
     });
   },
   update: (id, data) => {
-    const formData = new FormData();
-    Object.keys(data).forEach(key => {
-      if (data[key] !== null && data[key] !== undefined) {
-        formData.append(key, data[key]);
-      }
-    });
-    formData.append('_method', 'PUT');
-    return api.post(`/found-items/${id}`, formData, {
+    // Use POST with _method=PUT to handle file uploads properly
+    return api.post(`/found-items/${id}`, data, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
   },
@@ -53,6 +43,8 @@ export const foundItemsAPI = {
   approve: (id) => api.post(`/found-items/${id}/approve`),
   reject: (id, reason) => api.post(`/found-items/${id}/reject`, { rejection_reason: reason }),
   getPendingCount: () => api.get('/found-items/pending/count'),
+  // NEW: Mark a found item as claimed (owner action)
+  markAsClaimed: (id, claimDetails) => api.post(`/found-items/${id}/mark-as-claimed`, { claim_details: claimDetails }),
 };
 
 // For backward compatibility

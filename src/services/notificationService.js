@@ -16,7 +16,7 @@ Notifications.setNotificationHandler({
 // Safe check for Expo Go environment
 const isExpoGo = () => {
   try {
-    return Constants.appOwnership === 'expo';
+    return Constants.executionEnvironment === 'storeClient';
   } catch (e) {
     return true; // Assume it's Expo Go if we can't check
   }
@@ -90,6 +90,18 @@ export async function scheduleLocalNotification(title, body, data = {}, seconds 
     });
   } catch (error) {
     console.log('Could not schedule notification (non-critical)');
+  }
+}
+
+// Fires a notification immediately (no delay) — used by WebSocket events.
+export async function showLocalNotification(title, body, data = {}) {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: { title, body, data, sound: true },
+      trigger: null, // null = show immediately
+    });
+  } catch (error) {
+    console.log('Could not show notification (non-critical)');
   }
 }
 

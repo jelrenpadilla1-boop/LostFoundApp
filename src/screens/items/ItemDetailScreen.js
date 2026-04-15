@@ -1,28 +1,50 @@
 // src/screens/items/ItemDetailScreen.js
-import Icon from '@expo/vector-icons/Ionicons';
+import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Image,
   Linking,
+  Modal,
   Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import MapView, { Marker } from 'react-native-maps';
 import { foundItemsAPI, lostItemsAPI } from '../../api/items';
+import { matchesAPI } from '../../api/matches';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
+
+const { width } = Dimensions.get('window');
+const API_BASE_URL = 'http://10.116.78.132:8092';
 
 export default function ItemDetailScreen({ route, navigation }) {
   const { type, id } = route.params;
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [matches, setMatches] = useState([]);
+  const [isOwner, setIsOwner] = useState(false);
+  const [imageModalVisible, setImageModalVisible] = useState(false);
+  const [claimModalVisible, setClaimModalVisible] = useState(false);
+  const [rejectModalVisible, setRejectModalVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [claimDetails, setClaimDetails] = useState('');
+  const [imageError, setImageError] = useState(false);
   const { user, isAdmin, logout } = useAuth();
+  const { isDark } = useTheme();
 
   useFocusEffect(
     useCallback(() => {
@@ -30,35 +52,96 @@ export default function ItemDetailScreen({ route, navigation }) {
     }, [id, type])
   );
 
+  // Safe number formatter helper
+  const formatCoordinate = (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return value.toFixed(6);
+    if (typeof value === 'string' && !isNaN(parseFloat(value))) {
+      return parseFloat(value).toFixed(6);
+    }
+    return null;
+  };
+
+  const getImageUrl = (photoPath) => {
+    if (!photoPath) return null;
+    if (photoPath.startsWith('http')) return photoPath;
+    let cleanPath = photoPath;
+    if (cleanPath.startsWith('/')) cleanPath = cleanPath.substring(1);
+    return `${API_BASE_URL}/storage/${cleanPath}`;
+  };
+
   const loadItem = async () => {
     try {
       setLoading(true);
       console.log(`Loading ${type} item with ID: ${id}`);
-      
-      // Use getOne method instead of getLostItem/getFoundItem
+
       let response;
       if (type === 'lost') {
         response = await lostItemsAPI.getOne(id);
       } else {
         response = await foundItemsAPI.getOne(id);
       }
-      
-      console.log('Item response status:', response.status);
-      
-      // Handle response data
+
       let itemData;
-      if (response.data && response.data.data) {
+      let matchesData = [];
+      let ownerFromServer = null;
+
+      if (response.data?.data) {
         itemData = response.data.data;
-        setMatches(response.data.matches || []);
-      } else if (response.data && response.data.item) {
+        matchesData = response.data.matches || [];
+        ownerFromServer = response.data.is_owner;
+      } else if (response.data?.item) {
         itemData = response.data.item;
+        matchesData = response.data.matches || [];
+        ownerFromServer = response.data.is_owner;
       } else {
         itemData = response.data;
+        matchesData = response.data?.matches || [];
+        ownerFromServer = response.data?.is_owner;
       }
-      
-      console.log('Item loaded:', itemData?.item_name);
+
       setItem(itemData);
-      
+
+      if (ownerFromServer !== null && ownerFromServer !== undefined) {
+        setIsOwner(ownerFromServer);
+      } else {
+        setIsOwner(String(user?.id) === String(itemData?.user_id));
+      }
+
+      // If matches weren't included in the response, fetch them separately
+      if (matchesData.length === 0) {
+        try {
+          if (type === 'lost') {
+            const matchRes = await matchesAPI.getMatchesForLostItem(id);
+            matchesData =
+              matchRes.data?.matches ||
+              matchRes.data?.data ||
+              (Array.isArray(matchRes.data) ? matchRes.data : []);
+          } else {
+            const matchRes = await matchesAPI.getMyMatches();
+            let all = [];
+            if (matchRes.data?.data) {
+              all = matchRes.data.data;
+            } else if (matchRes.data?.matches) {
+              all = matchRes.data.matches;
+            } else if (Array.isArray(matchRes.data)) {
+              all = matchRes.data;
+            }
+            
+            matchesData = all.filter((m) => {
+              const matchFoundItemId = String(m.found_item_id || m.found_item?.id || m.foundItem?.id);
+              const currentItemId = String(id);
+              return matchFoundItemId === currentItemId;
+            });
+          }
+        } catch (matchErr) {
+          console.log('Could not load matches:', matchErr?.response?.status);
+        }
+      }
+
+      setMatches(matchesData);
+      setImageError(false);
+
     } catch (error) {
       console.error('Error loading item:', error);
       if (error.response?.status === 401) {
@@ -66,7 +149,7 @@ export default function ItemDetailScreen({ route, navigation }) {
           { text: 'OK', onPress: () => logout() }
         ]);
       } else if (error.response?.status === 403) {
-        Alert.alert('Access Denied', 'You don\'t have permission to view this item');
+        Alert.alert('Access Denied', "You don't have permission to view this item");
         navigation.goBack();
       } else {
         Alert.alert('Error', 'Failed to load item details');
@@ -78,9 +161,11 @@ export default function ItemDetailScreen({ route, navigation }) {
   };
 
   const handleDelete = async () => {
+    if (deleting) return;
+    
     Alert.alert(
       'Delete Item',
-      'Are you sure you want to delete this item? This action cannot be undone.',
+      `Are you sure you want to delete "${item?.item_name}"? This action cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -88,16 +173,41 @@ export default function ItemDetailScreen({ route, navigation }) {
           style: 'destructive',
           onPress: async () => {
             try {
+              setDeleting(true);
+              console.log(`Deleting ${type} item with ID: ${id}`);
+              
+              let response;
               if (type === 'lost') {
-                await lostItemsAPI.delete(id);
+                response = await lostItemsAPI.delete(id);
               } else {
-                await foundItemsAPI.delete(id);
+                response = await foundItemsAPI.delete(id);
               }
-              Alert.alert('Success', 'Item deleted successfully');
-              navigation.goBack();
+              
+              console.log('Delete response:', response.data);
+              
+              if (response.data?.success) {
+                Alert.alert('Success', response.data.message || 'Item deleted successfully');
+                navigation.goBack();
+              } else {
+                Alert.alert('Error', response.data?.message || 'Failed to delete item');
+              }
             } catch (error) {
               console.error('Error deleting item:', error);
-              Alert.alert('Error', 'Failed to delete item');
+              console.error('Error response:', error.response?.data);
+              
+              let errorMessage = 'Failed to delete item. Please try again.';
+              
+              if (error.response?.status === 403) {
+                errorMessage = 'You do not have permission to delete this item.';
+              } else if (error.response?.status === 404) {
+                errorMessage = 'Item not found.';
+              } else if (error.response?.data?.message) {
+                errorMessage = error.response.data.message;
+              }
+              
+              Alert.alert('Error', errorMessage);
+            } finally {
+              setDeleting(false);
             }
           }
         }
@@ -105,22 +215,46 @@ export default function ItemDetailScreen({ route, navigation }) {
     );
   };
 
-  const handleMarkAsFound = async () => {
+  // FIXED: Mark as Claimed for Found Items - Using dedicated endpoint
+  const handleMarkAsClaimed = async () => {
+    if (!claimDetails.trim()) {
+      Alert.alert('Error', 'Please provide claim details');
+      return;
+    }
+    
     Alert.alert(
-      'Mark as Found',
-      'Have you found this item? This will update the status and notify potential matches.',
+      'Mark as Claimed',
+      `Are you sure you want to mark "${item?.item_name}" as claimed?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Confirm',
           onPress: async () => {
+            if (updating) return;
+            
             try {
-              await lostItemsAPI.update(id, { status: 'found' });
-              Alert.alert('Success', 'Item marked as found');
-              loadItem();
+              setUpdating(true);
+              console.log(`Marking found item ${id} as claimed`);
+              
+              // Use the dedicated markAsClaimed endpoint
+              const response = await foundItemsAPI.markAsClaimed(id, claimDetails);
+              
+              console.log('Mark as claimed response:', response.data);
+              
+              if (response.data?.success) {
+                Alert.alert('Success', response.data.message || 'Item marked as claimed successfully!');
+                setClaimModalVisible(false);
+                setClaimDetails('');
+                loadItem();
+              } else {
+                Alert.alert('Error', response.data?.message || 'Failed to mark item as claimed');
+              }
             } catch (error) {
-              console.error('Error marking item:', error);
-              Alert.alert('Error', 'Failed to update item status');
+              console.error('Error marking item as claimed:', error);
+              console.error('Error response:', error.response?.data);
+              Alert.alert('Error', error.response?.data?.message || 'Failed to mark item as claimed');
+            } finally {
+              setUpdating(false);
             }
           }
         }
@@ -128,279 +262,1002 @@ export default function ItemDetailScreen({ route, navigation }) {
     );
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'pending': return '#f59e0b';
-      case 'approved': return '#10b981';
-      case 'found': return '#3b82f6';
-      case 'returned': return '#7c3aed';
-      case 'rejected': return '#ef4444';
-      default: return '#5b5b7a';
-    }
+  // FIXED: Mark as Found for Lost Items - Using dedicated endpoint
+  const handleMarkAsFound = async () => {
+    Alert.alert(
+      'Mark as Found',
+      `Are you sure you want to mark "${item?.item_name}" as found?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            if (updating) return;
+            
+            try {
+              setUpdating(true);
+              console.log(`Marking lost item ${id} as found`);
+              
+              // Use the dedicated markAsFound endpoint
+              const response = await lostItemsAPI.markAsFound(id);
+              
+              console.log('Mark as found response:', response.data);
+              
+              if (response.data?.success) {
+                Alert.alert('Success', response.data.message || 'Item marked as found successfully!');
+                loadItem();
+              } else {
+                Alert.alert('Error', response.data?.message || 'Failed to mark item as found');
+              }
+            } catch (error) {
+              console.error('Error marking item as found:', error);
+              console.error('Error response:', error.response?.data);
+              Alert.alert('Error', error.response?.data?.message || 'Failed to mark item as found');
+            } finally {
+              setUpdating(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'pending': return 'time-outline';
-      case 'approved': return 'checkmark-circle';
-      case 'found': return 'checkmark-done';
-      case 'returned': return 'home';
-      case 'rejected': return 'close-circle';
-      default: return 'information-circle';
+  const handleApprove = async () => {
+    Alert.alert(
+      'Approve Item',
+      `Are you sure you want to approve "${item?.item_name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Approve',
+          onPress: async () => {
+            try {
+              if (type === 'lost') {
+                await lostItemsAPI.approve(id);
+              } else {
+                await foundItemsAPI.approve(id);
+              }
+              Alert.alert('Success', 'Item approved successfully');
+              loadItem();
+            } catch (error) {
+              console.error('Error approving item:', error);
+              Alert.alert('Error', 'Failed to approve item');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleReject = async () => {
+    if (!rejectionReason.trim()) {
+      Alert.alert('Error', 'Please provide a rejection reason');
+      return;
     }
+    
+    Alert.alert(
+      'Reject Item',
+      `Are you sure you want to reject "${item?.item_name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (type === 'lost') {
+                await lostItemsAPI.reject(id, rejectionReason);
+              } else {
+                await foundItemsAPI.reject(id, rejectionReason);
+              }
+              Alert.alert('Success', 'Item rejected successfully');
+              setRejectModalVisible(false);
+              setRejectionReason('');
+              loadItem();
+            } catch (error) {
+              console.error('Error rejecting item:', error);
+              Alert.alert('Error', 'Failed to reject item');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const getStatusConfig = (status) => {
+    const configs = {
+      pending: { color: '#f59e0b', bg: '#fef3c7', icon: 'clock', label: 'Pending' },
+      approved: { color: '#10b981', bg: '#d1fae5', icon: 'check-circle', label: 'Active' },
+      claimed: { color: '#10b981', bg: '#d1fae5', icon: 'handshake', label: 'Claimed' },
+      returned: { color: '#7c3aed', bg: '#ede9fe', icon: 'home', label: 'Returned' },
+      disposed: { color: '#5b5b7a', bg: '#f0f0f0', icon: 'trash-2', label: 'Disposed' },
+      rejected: { color: '#ef4444', bg: '#fee2e2', icon: 'x-circle', label: 'Rejected' },
+      found: { color: '#3b82f6', bg: '#dbeafe', icon: 'check-circle', label: 'Found' },
+      recovered: { color: '#10b981', bg: '#d1fae5', icon: 'award', label: 'Recovered' },
+    };
+    return configs[status] || configs.pending;
   };
 
   const openLocation = () => {
     const location = item?.lost_location || item?.found_location;
     const lat = item?.latitude;
     const lng = item?.longitude;
-    
-    if (lat && lng) {
+
+    if (lat && lng && typeof lat === 'number' && typeof lng === 'number' && lat !== 0 && lng !== 0) {
       const url = Platform.select({
         ios: `maps:0,0?q=${lat},${lng}`,
         android: `geo:${lat},${lng}?q=${lat},${lng}`,
       });
-      Linking.openURL(url);
-    } else if (location) {
+      if (url) Linking.openURL(url);
+    } else if (location && typeof location === 'string' && location.trim()) {
       const url = `https://maps.google.com/?q=${encodeURIComponent(location)}`;
       Linking.openURL(url);
     }
   };
 
+  const handleSendMessage = () => {
+    if (!item?.user) {
+      Alert.alert('Error', 'User information not available');
+      return;
+    }
+    
+    navigation.navigate('Chat', { 
+      userId: item.user.id,
+      userName: item.user.name,
+      userEmail: item.user.email
+    });
+  };
+
+  const styles = getStyles(isDark);
+  const photoUrl = item?.photo ? getImageUrl(item.photo) : null;
+
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7c3aed" />
-        <Text style={styles.loadingText}>Loading item details...</Text>
+      <View style={[styles.center, { backgroundColor: isDark ? '#141414' : '#faf9fe' }]}>
+        <ActivityIndicator size="large" color="#e50914" />
+        <Text style={[styles.loadingText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>Loading item details...</Text>
       </View>
     );
   }
 
   if (!item) {
     return (
-      <View style={styles.center}>
-        <Icon name="alert-circle-outline" size={64} color="#ccc" />
-        <Text style={styles.emptyText}>Item not found</Text>
+      <View style={[styles.center, { backgroundColor: isDark ? '#141414' : '#faf9fe' }]}>
+        <Feather name="alert-circle" size={64} color={isDark ? '#333333' : '#ccc'} />
+        <Text style={[styles.emptyText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>Item not found</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backButtonText}>Go Back</Text>
+          <LinearGradient colors={['#e50914', '#b20710']} style={styles.backButtonGradient}>
+            <Text style={styles.backButtonText}>Go Back</Text>
+          </LinearGradient>
         </TouchableOpacity>
       </View>
     );
   }
 
-  const isOwner = user?.id === item.user_id;
+  if (!isAdmin && !isOwner && item.status === 'pending') {
+    return (
+      <View style={[styles.accessDeniedContainer, { backgroundColor: isDark ? '#141414' : '#faf9fe' }]}>
+        <View style={[styles.accessDeniedIcon, { backgroundColor: isDark ? 'rgba(229,9,20,0.2)' : '#fee2e2' }]}>
+          <Feather name="lock" size={40} color="#ef4444" />
+        </View>
+        <Text style={[styles.accessDeniedTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Access Denied</Text>
+        <Text style={[styles.accessDeniedText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>
+          This item is pending approval and not yet visible to the public.
+        </Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <LinearGradient colors={['#e50914', '#b20710']} style={styles.backButtonGradient}>
+            <Text style={styles.backButtonText}>Back to Items</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const statusConfig = getStatusConfig(item.status);
   const canEdit = isOwner || isAdmin;
   const canDelete = isOwner || isAdmin;
+  const showActions = (item.status === 'pending' && (isAdmin || isOwner)) ||
+                      (item.status === 'approved' && isOwner) ||
+                      isAdmin;
+
+  const latFormatted = formatCoordinate(item?.latitude);
+  const lngFormatted = formatCoordinate(item?.longitude);
+  const hasValidCoordinates = latFormatted && lngFormatted && item?.latitude !== 0 && item?.longitude !== 0;
+  const locationText = (item?.lost_location || item?.found_location || '').trim()
+    || (hasValidCoordinates ? `${latFormatted}, ${lngFormatted}` : null);
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Image Section */}
-      <View style={styles.imageContainer}>
-        {item.photo ? (
-          <Image 
-            source={{ uri: item.photo.startsWith('http') ? item.photo : `http://10.214.114.132:8092/storage/${item.photo}` }}
-            style={styles.image}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={styles.noImage}>
-            <Icon name="image-outline" size={64} color="#ccc" />
-            <Text style={styles.noImageText}>No Image Available</Text>
-          </View>
-        )}
-        
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-          <Icon name={getStatusIcon(item.status)} size={14} color="#fff" />
-          <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
-        </View>
-      </View>
+    <>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+      <ScrollView style={[styles.container, { backgroundColor: isDark ? '#141414' : '#faf9fe' }]} showsVerticalScrollIndicator={false}>
+        <LinearGradient
+          colors={isDark ? ['#1a1a1a', '#141414'] : ['#ffffff', '#faf9fe']}
+          style={styles.header}
+        >
+         
+        </LinearGradient>
 
-      {/* Content Section */}
-      <View style={styles.content}>
-        <Text style={styles.title}>{item.item_name}</Text>
-        
-        <View style={styles.metaRow}>
-          <View style={styles.metaItem}>
-            <Icon name="pricetag-outline" size={16} color="#5b5b7a" />
-            <Text style={styles.metaText}>{item.category?.toUpperCase()}</Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Icon name="calendar-outline" size={16} color="#5b5b7a" />
-            <Text style={styles.metaText}>
-              {type === 'lost' ? 'Lost: ' : 'Found: '}
-              {new Date(item.date_lost || item.date_found).toLocaleDateString()}
-            </Text>
-          </View>
-        </View>
+        {/* Image Section */}
+        <View style={styles.imageContainer}>
+          {photoUrl ? (
+            <>
+              <Image
+                source={{ uri: photoUrl }}
+                style={styles.image}
+                resizeMode="cover"
+                onError={() => setImageError(true)}
+                onLoad={() => setImageError(false)}
+              />
+              <TouchableOpacity 
+                style={styles.imageExpandButton}
+                onPress={() => setImageModalVisible(true)}
+              >
+                <Feather name="maximize-2" size={18} color="#fff" />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <View style={[styles.noImage, { backgroundColor: isDark ? '#2a2a2a' : '#f5f5f5' }]}>
+              <Feather name="image" size={48} color={isDark ? '#666666' : '#ccc'} />
+              <Text style={[styles.noImageText, { color: isDark ? '#b3b3b3' : '#999' }]}>No Photo</Text>
+            </View>
+          )}
 
-        {/* Description */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Description</Text>
-          <Text style={styles.description}>{item.description}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: statusConfig.color }]}>
+            <Feather name={statusConfig.icon} size={12} color="#fff" />
+            <Text style={styles.statusText}>{statusConfig.label}</Text>
+          </View>
         </View>
 
-        {/* Location */}
-        {(item.lost_location || item.found_location || (item.latitude && item.longitude)) && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Location</Text>
-            <TouchableOpacity style={styles.locationCard} onPress={openLocation}>
-              <Icon name="location-outline" size={24} color="#7c3aed" />
-              <View style={styles.locationInfo}>
-                <Text style={styles.locationText}>
-                  {item.lost_location || item.found_location || `${item.latitude}, ${item.longitude}`}
-                </Text>
-                <Text style={styles.locationAction}>Tap to view on map →</Text>
+        {/* Content Section */}
+        <View style={styles.content}>
+          <Text style={[styles.title, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{item.item_name}</Text>
+
+          <View style={styles.metaRow}>
+            <View style={styles.metaItem}>
+              <Feather name="tag" size={14} color={isDark ? '#666666' : '#5b5b7a'} />
+              <Text style={[styles.metaText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>{item.category?.toUpperCase()}</Text>
+            </View>
+            <View style={styles.metaItem}>
+              <Feather name="calendar" size={14} color={isDark ? '#666666' : '#5b5b7a'} />
+              <Text style={[styles.metaText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>
+                {type === 'lost' ? 'Lost: ' : 'Found: '}
+                {new Date(item.date_lost || item.date_found).toLocaleDateString()}
+              </Text>
+            </View>
+          </View>
+
+          {isOwner && (
+            <View style={[styles.ownerBadge, { backgroundColor: isDark ? 'rgba(229,9,20,0.2)' : '#ede9fe' }]}>
+              <Feather name="star" size={10} color="#e50914" />
+              <Text style={[styles.ownerBadgeText, { color: '#e50914' }]}>Your Item</Text>
+            </View>
+          )}
+
+          {isAdmin && (
+            <View style={[styles.adminBadge, { backgroundColor: isDark ? 'rgba(245,197,24,0.2)' : '#fef3c7' }]}>
+              <Feather name="crown" size={10} color="#f59e0b" />
+              <Text style={[styles.adminBadgeText, { color: '#f59e0b' }]}>Admin View</Text>
+            </View>
+          )}
+
+          {/* Alerts */}
+          {item.status === 'rejected' && item.rejection_reason && (isAdmin || isOwner) && (
+            <View style={[styles.alertCard, styles.alertError]}>
+              <Feather name="alert-circle" size={18} color="#ef4444" />
+              <View style={styles.alertContent}>
+                <Text style={[styles.alertTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Item Rejected</Text>
+                <Text style={[styles.alertText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>{item.rejection_reason}</Text>
               </View>
-            </TouchableOpacity>
-          </View>
-        )}
+            </View>
+          )}
 
-        {/* Reporter Info */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Reported By</Text>
-          <View style={styles.reporterCard}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {item.user?.name?.charAt(0).toUpperCase() || '?'}
+          {item.status === 'pending' && isOwner && !isAdmin && (
+            <View style={[styles.alertCard, styles.alertWarning]}>
+              <Feather name="clock" size={18} color="#f59e0b" />
+              <View style={styles.alertContent}>
+                <Text style={[styles.alertTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Pending Approval</Text>
+                <Text style={[styles.alertText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>
+                  Your item is awaiting admin review. It will be visible to others once approved.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Description */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Description</Text>
+            <Text style={[styles.description, { 
+              backgroundColor: isDark ? '#1a1a1a' : '#fff',
+              borderColor: isDark ? '#333333' : '#edeef5',
+              color: isDark ? '#e5e5e5' : '#5b5b7a'
+            }]}>{item.description}</Text>
+          </View>
+
+          {/* Details Grid */}
+          <View style={styles.detailsGrid}>
+            <View style={[styles.detailCard, { 
+              backgroundColor: isDark ? '#1a1a1a' : '#fff',
+              borderColor: isDark ? '#333333' : '#edeef5'
+            }]}>
+              <Text style={[styles.detailLabel, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>Category</Text>
+              <Text style={[styles.detailValue, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{item.category?.toUpperCase()}</Text>
+            </View>
+            <View style={[styles.detailCard, { 
+              backgroundColor: isDark ? '#1a1a1a' : '#fff',
+              borderColor: isDark ? '#333333' : '#edeef5'
+            }]}>
+              <Text style={[styles.detailLabel, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>Date {type === 'lost' ? 'Lost' : 'Found'}</Text>
+              <Text style={[styles.detailValue, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>
+                {new Date(item.date_lost || item.date_found).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric'
+                })}
               </Text>
             </View>
-            <View style={styles.reporterInfo}>
-              <Text style={styles.reporterName}>{item.user?.name || 'Unknown User'}</Text>
-              <Text style={styles.reporterDate}>
-                Reported {new Date(item.created_at).toLocaleDateString()}
-              </Text>
-            </View>
-            {!isOwner && item.user && (
-              <TouchableOpacity 
-                style={styles.messageButton}
-                onPress={() => navigation.navigate('Chat', { userId: item.user.id })}
-              >
-                <Icon name="chatbubble-outline" size={20} color="#7c3aed" />
-              </TouchableOpacity>
+            {(item.lost_location || item.found_location) && (
+              <View style={[styles.detailCard, styles.detailCardFull, { 
+                backgroundColor: isDark ? '#1a1a1a' : '#fff',
+                borderColor: isDark ? '#333333' : '#edeef5'
+              }]}>
+                <Text style={[styles.detailLabel, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>Location</Text>
+                <Text style={[styles.detailValue, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{item.lost_location || item.found_location}</Text>
+              </View>
             )}
+            
+            {hasValidCoordinates && (
+              <View style={[styles.detailCard, styles.detailCardFull, { 
+                backgroundColor: isDark ? '#1a1a1a' : '#fff',
+                borderColor: isDark ? '#333333' : '#edeef5'
+              }]}>
+                <Text style={[styles.detailLabel, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>Coordinates</Text>
+                <Text style={[styles.detailValue, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>
+                  {latFormatted}, {lngFormatted}
+                </Text>
+              </View>
+            )}
+            
+            <View style={[styles.detailCard, styles.detailCardFull, { 
+              backgroundColor: isDark ? '#1a1a1a' : '#fff',
+              borderColor: isDark ? '#333333' : '#edeef5'
+            }]}>
+              <Text style={[styles.detailLabel, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>{type === 'lost' ? 'Lost By' : 'Found By'}</Text>
+              <Text style={[styles.detailValue, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>
+                {item.user?.name || 'Unknown User'}
+                {item.user_id === user?.id && <Text style={[styles.youBadge, { color: '#e50914' }]}> (you)</Text>}
+              </Text>
+            </View>
+          </View>
+
+          {/* Quick Actions */}
+          {showActions && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Quick Actions</Text>
+              <View style={styles.actionsGrid}>
+                {type === 'found' && item.status === 'approved' && isOwner && (
+                  <TouchableOpacity 
+                    style={[styles.actionButton, styles.successButton]}
+                    onPress={() => setClaimModalVisible(true)}
+                    disabled={updating}
+                  >
+                    {updating ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Feather name="handshake" size={16} color="#fff" />
+                        <Text style={styles.actionButtonText}>Mark as Claimed</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+                
+                {type === 'lost' && item.status === 'approved' && isOwner && (
+                  <TouchableOpacity 
+                    style={[styles.actionButton, styles.successButton]}
+                    onPress={handleMarkAsFound}
+                    disabled={updating}
+                  >
+                    {updating ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Feather name="check-circle" size={16} color="#fff" />
+                        <Text style={styles.actionButtonText}>Mark as Found</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+                
+                {isAdmin && item.status === 'pending' && (
+                  <>
+                    <TouchableOpacity 
+                      style={[styles.actionButton, styles.approveButton]}
+                      onPress={handleApprove}
+                    >
+                      <Feather name="check-circle" size={16} color="#fff" />
+                      <Text style={styles.actionButtonText}>Approve</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.actionButton, styles.rejectButton]}
+                      onPress={() => setRejectModalVisible(true)}
+                    >
+                      <Feather name="x-circle" size={16} color="#fff" />
+                      <Text style={styles.actionButtonText}>Reject</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                {canEdit && (
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.editButton]}
+                    onPress={() => navigation.navigate('EditItem', { type, id })}
+                  >
+                    <Feather name="edit-2" size={16} color="#fff" />
+                    <Text style={styles.actionButtonText}>Edit</Text>
+                  </TouchableOpacity>
+                )}
+
+                {canDelete && (
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.deleteButton]}
+                    onPress={handleDelete}
+                    disabled={deleting}
+                  >
+                    {deleting ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Feather name="trash-2" size={16} color="#fff" />
+                        <Text style={styles.actionButtonText}>Delete</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* Matches Section */}
+          {matches.length > 0 && (item.status === 'approved' || isAdmin || isOwner) && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Potential Matches</Text>
+                <View style={styles.matchesBadge}>
+                  <Text style={styles.matchesBadgeText}>{matches.length}</Text>
+                </View>
+              </View>
+              
+              {matches.map((match) => {
+                const paired = type === 'lost' ? match.found_item : match.lost_item;
+                const matchScore = match.match_score;
+                const scoreClass = matchScore >= 80 ? 'high' : (matchScore >= 60 ? 'medium' : 'low');
+                
+                return (
+                  <TouchableOpacity
+                    key={match.id}
+                    style={[styles.matchCard, { 
+                      backgroundColor: isDark ? '#1a1a1a' : '#fff',
+                      borderColor: isDark ? '#333333' : '#edeef5'
+                    }]}
+                    onPress={() => navigation.navigate('MatchDetail', { id: match.id })}
+                  >
+                    <View style={styles.matchHeader}>
+                      <View style={[styles.matchScore, styles[`score${scoreClass}`]]}>
+                        <Text style={styles.matchScoreText}>{matchScore}%</Text>
+                      </View>
+                      <View style={styles.matchInfo}>
+                        <Text style={[styles.matchItemName, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>
+                          {paired?.item_name || 'Unknown Item'}
+                        </Text>
+                        {paired?.user_id === user?.id && (
+                          <View style={styles.yourItemBadge}>
+                            <Text style={styles.yourItemBadgeText}>Your Item</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Feather name="chevron-right" size={14} color={isDark ? '#666666' : '#7c3aed'} />
+                    </View>
+                    
+                    <Text style={[styles.matchDescription, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]} numberOfLines={2}>
+                      {paired?.description}
+                    </Text>
+                    
+                    <View style={styles.matchFooter}>
+                      <Text style={[styles.matchFooterText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>
+                        <Feather name="user" size={10} color={isDark ? '#666666' : '#5b5b7a'} /> {paired?.user?.name}
+                      </Text>
+                      <Text style={[styles.matchFooterText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>
+                        <Feather name="calendar" size={10} color={isDark ? '#666666' : '#5b5b7a'} /> {' '}
+                        {new Date(paired?.date_lost || paired?.date_found).toLocaleDateString()}
+                      </Text>
+                    </View>
+
+                    {match.status !== 'pending' && (
+                      <View style={[styles.matchStatus, { borderTopColor: isDark ? '#333333' : '#edeef5' }]}>
+                        <View style={[styles.matchStatusBadge, { backgroundColor: getStatusConfig(match.status).color }]}>
+                          <Text style={styles.matchStatusText}>{match.status.toUpperCase()}</Text>
+                        </View>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Contact Card - Found Items */}
+          {(type === 'found' && (item.status !== 'pending' || isAdmin || isOwner)) && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Contact Finder</Text>
+              <View style={[styles.contactCard, { 
+                backgroundColor: isDark ? '#1a1a1a' : '#fff',
+                borderColor: isDark ? '#333333' : '#edeef5'
+              }]}>
+                <View style={[styles.contactProfile, { borderBottomColor: isDark ? '#333333' : '#edeef5' }]}>
+                  <View style={styles.contactAvatar}>
+                    <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactAvatarGradient}>
+                      <Text style={styles.contactAvatarText}>
+                        {item.user?.name?.charAt(0).toUpperCase() || '?'}
+                      </Text>
+                    </LinearGradient>
+                  </View>
+                  <View style={styles.contactDetails}>
+                    <Text style={[styles.contactName, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{item.user?.name || 'Unknown User'}</Text>
+                    <Text style={[styles.contactRole, { color: '#e50914' }]}>
+                      {item.user?.isAdmin ? 'Admin' : 'Member'}
+                      {item.user_id === user?.id && <Text style={[styles.youIndicator, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}> (you)</Text>}
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.contactInfoList}>
+                  <View style={[styles.contactInfoItem, { borderBottomColor: isDark ? '#333333' : '#edeef5' }]}>
+                    <Feather name="mail" size={14} color="#e50914" />
+                    <Text style={[styles.contactInfoText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>{item.user?.email}</Text>
+                  </View>
+                </View>
+                
+                {!isOwner && !isAdmin && item.user && item.user.id !== user?.id && (
+                  <TouchableOpacity
+                    style={styles.messageButton}
+                    onPress={handleSendMessage}
+                  >
+                    <LinearGradient colors={['#e50914', '#b20710']} style={styles.messageButtonGradient}>
+                      <Feather name="message-circle" size={16} color="#fff" />
+                      <Text style={styles.messageButtonText}>Send Message</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* Contact Card - Lost Items (for non-owners) */}
+          {(type === 'lost' && (item.status !== 'pending' || isAdmin || isOwner) && !isOwner && !isAdmin && item.user && item.user.id !== user?.id) && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>Contact Owner</Text>
+              <View style={[styles.contactCard, { 
+                backgroundColor: isDark ? '#1a1a1a' : '#fff',
+                borderColor: isDark ? '#333333' : '#edeef5'
+              }]}>
+                <View style={[styles.contactProfile, { borderBottomColor: isDark ? '#333333' : '#edeef5' }]}>
+                  <View style={styles.contactAvatar}>
+                    <LinearGradient colors={['#e50914', '#b20710']} style={styles.contactAvatarGradient}>
+                      <Text style={styles.contactAvatarText}>
+                        {item.user?.name?.charAt(0).toUpperCase() || '?'}
+                      </Text>
+                    </LinearGradient>
+                  </View>
+                  <View style={styles.contactDetails}>
+                    <Text style={[styles.contactName, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{item.user?.name || 'Unknown User'}</Text>
+                    <Text style={[styles.contactRole, { color: '#e50914' }]}>
+                      {item.user?.isAdmin ? 'Admin' : 'Member'}
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.contactInfoList}>
+                  <View style={[styles.contactInfoItem, { borderBottomColor: isDark ? '#333333' : '#edeef5' }]}>
+                    <Feather name="mail" size={14} color="#e50914" />
+                    <Text style={[styles.contactInfoText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>{item.user?.email}</Text>
+                  </View>
+                </View>
+                
+                <TouchableOpacity
+                  style={styles.messageButton}
+                  onPress={handleSendMessage}
+                >
+                  <LinearGradient colors={['#e50914', '#b20710']} style={styles.messageButtonGradient}>
+                    <Feather name="message-circle" size={16} color="#fff" />
+                    <Text style={styles.messageButtonText}>Send Message</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Location Map Card */}
+          {(item.lost_location || item.found_location || hasValidCoordinates) &&
+           (item.status !== 'pending' || isAdmin || isOwner) && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{type === 'lost' ? 'Lost Location' : 'Found Location'}</Text>
+
+              {locationText && (
+                <View style={styles.locationRow}>
+                  <Feather name="map-pin" size={14} color="#e50914" />
+                  <Text style={[styles.locationNameText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>{locationText}</Text>
+                </View>
+              )}
+
+              {hasValidCoordinates && (
+                <View style={styles.locationRow}>
+                  <Feather name="navigation" size={14} color="#e50914" />
+                  <Text style={[styles.locationNameText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>
+                    {latFormatted}, {lngFormatted}
+                  </Text>
+                </View>
+              )}
+
+              <View style={[styles.mapContainer, { borderColor: isDark ? '#333333' : '#edeef5' }]}>
+                {hasValidCoordinates ? (
+                  <MapView
+                    style={styles.map}
+                    initialRegion={{
+                      latitude: parseFloat(item.latitude),
+                      longitude: parseFloat(item.longitude),
+                      latitudeDelta: 0.005,
+                      longitudeDelta: 0.005,
+                    }}
+                    scrollEnabled={false}
+                    zoomEnabled={false}
+                    pitchEnabled={false}
+                    rotateEnabled={false}
+                  >
+                    <Marker
+                      coordinate={{
+                        latitude: parseFloat(item.latitude),
+                        longitude: parseFloat(item.longitude),
+                      }}
+                      title={item.item_name}
+                      description={locationText}
+                      pinColor="#e50914"
+                    />
+                  </MapView>
+                ) : (
+                  <View style={[styles.mapNoCoords, { backgroundColor: isDark ? '#2a2a2a' : '#faf9fe' }]}>
+                    <Feather name="map" size={32} color="#e50914" />
+                    <Text style={[styles.mapNoCoordsText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>No exact coordinates available</Text>
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity style={styles.directionsButton} onPress={openLocation}>
+                <LinearGradient colors={['#e50914', '#b20710']} style={styles.directionsButtonGradient}>
+                  <Feather name="navigation" size={14} color="#fff" />
+                  <Text style={styles.directionsButtonText}>Open in Maps</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Image Modal */}
+      <Modal
+        visible={imageModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setImageModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <TouchableOpacity 
+              style={styles.modalClose}
+              onPress={() => setImageModalVisible(false)}
+            >
+              <Feather name="x" size={22} color="#fff" />
+            </TouchableOpacity>
+            <Image
+              source={{ uri: photoUrl }}
+              style={styles.modalImage}
+              resizeMode="contain"
+            />
           </View>
         </View>
+      </Modal>
 
-        {/* Matches Section (for lost items) */}
-        {type === 'lost' && matches.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Potential Matches ({matches.length})</Text>
-            {matches.map((match) => (
-              <TouchableOpacity 
-                key={match.id}
-                style={styles.matchCard}
-                onPress={() => navigation.navigate('MatchDetail', { id: match.id })}
-              >
-                <View style={styles.matchHeader}>
-                  <View style={[styles.matchScore, 
-                    match.match_score >= 80 ? styles.scoreHigh : 
-                    match.match_score >= 60 ? styles.scoreMedium : styles.scoreLow
-                  ]}>
-                    <Text style={styles.scoreText}>{match.match_score}%</Text>
-                  </View>
-                  <Text style={styles.matchItemName}>{match.found_item?.item_name}</Text>
-                </View>
-                <Text style={styles.matchDescription} numberOfLines={2}>
-                  {match.found_item?.description}
+      {/* Claim Modal */}
+      <Modal
+        visible={claimModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setClaimModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: isDark ? '#1a1a1a' : '#fff' }]}>
+            <LinearGradient colors={['#e50914', '#b20710']} style={styles.modalCardHeader}>
+              <Feather name="handshake" size={22} color="#fff" />
+              <Text style={styles.modalCardTitle}>Mark as Claimed</Text>
+              <TouchableOpacity onPress={() => setClaimModalVisible(false)}>
+                <Feather name="x" size={22} color="#fff" />
+              </TouchableOpacity>
+            </LinearGradient>
+            
+            <View style={styles.modalCardBody}>
+              <Text style={[styles.modalLabel, { color: isDark ? '#b3b3b3' : '#1e1b2f' }]}>Claim Details</Text>
+              <TextInput
+                style={[styles.modalInput, { 
+                  backgroundColor: isDark ? '#2a2a2a' : '#fff',
+                  borderColor: isDark ? '#333333' : '#edeef5',
+                  color: isDark ? '#ffffff' : '#1e1b2f'
+                }]}
+                multiline
+                numberOfLines={4}
+                placeholder="Add details about the claim..."
+                placeholderTextColor={isDark ? '#666666' : '#aaa'}
+                value={claimDetails}
+                onChangeText={setClaimDetails}
+              />
+              
+              <View style={[styles.infoBox, { backgroundColor: isDark ? 'rgba(33,150,243,0.15)' : '#dbeafe' }]}>
+                <Feather name="info" size={18} color="#3b82f6" />
+                <Text style={[styles.infoBoxText, { color: isDark ? '#e5e5e5' : '#1e1b2f' }]}>
+                  This will notify the finder and update the item status to "Claimed".
                 </Text>
-                <Icon name="chevron-forward" size={16} color="#5b5b7a" style={styles.matchArrow} />
+              </View>
+            </View>
+            
+            <View style={[styles.modalCardFooter, { borderTopColor: isDark ? '#333333' : '#edeef5' }]}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setClaimModalVisible(false)}
+              >
+                <Text style={[styles.modalCancelButtonText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>Cancel</Text>
               </TouchableOpacity>
-            ))}
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.modalConfirmButton]}
+                onPress={handleMarkAsClaimed}
+                disabled={updating}
+              >
+                <LinearGradient colors={['#2e7d32', '#1b5e20']} style={styles.modalConfirmGradient}>
+                  {updating ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalConfirmButtonText}>Confirm</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
           </View>
-        )}
+        </View>
+      </Modal>
 
-        {/* Action Buttons */}
-        {(canEdit || canDelete || (type === 'lost' && isOwner && item.status === 'approved')) && (
-          <View style={styles.actionContainer}>
-            {canEdit && (
-              <TouchableOpacity 
-                style={[styles.actionButton, styles.editButton]}
-                onPress={() => navigation.navigate('EditItem', { type, id })}
-              >
-                <Icon name="create-outline" size={20} color="#fff" />
-                <Text style={styles.actionButtonText}>Edit</Text>
+      {/* Reject Modal */}
+      <Modal
+        visible={rejectModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setRejectModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: isDark ? '#1a1a1a' : '#fff' }]}>
+            <LinearGradient colors={['#e50914', '#b20710']} style={styles.modalCardHeader}>
+              <Feather name="x-circle" size={22} color="#fff" />
+              <Text style={styles.modalCardTitle}>Reject Item</Text>
+              <TouchableOpacity onPress={() => setRejectModalVisible(false)}>
+                <Feather name="x" size={22} color="#fff" />
               </TouchableOpacity>
-            )}
+            </LinearGradient>
             
-            {type === 'lost' && isOwner && item.status === 'approved' && (
-              <TouchableOpacity 
-                style={[styles.actionButton, styles.foundButton]}
-                onPress={handleMarkAsFound}
-              >
-                <Icon name="checkmark-done-outline" size={20} color="#fff" />
-                <Text style={styles.actionButtonText}>Mark as Found</Text>
-              </TouchableOpacity>
-            )}
+            <View style={styles.modalCardBody}>
+              <Text style={[styles.modalLabel, { color: isDark ? '#b3b3b3' : '#1e1b2f' }]}>
+                Rejection Reason <Text style={styles.required}>*</Text>
+              </Text>
+              <TextInput
+                style={[styles.modalInput, { 
+                  backgroundColor: isDark ? '#2a2a2a' : '#fff',
+                  borderColor: isDark ? '#333333' : '#edeef5',
+                  color: isDark ? '#ffffff' : '#1e1b2f'
+                }]}
+                multiline
+                numberOfLines={4}
+                placeholder="Please provide a reason for rejection..."
+                placeholderTextColor={isDark ? '#666666' : '#aaa'}
+                value={rejectionReason}
+                onChangeText={setRejectionReason}
+              />
+              
+              <View style={[styles.infoBox, { backgroundColor: isDark ? 'rgba(33,150,243,0.15)' : '#dbeafe' }]}>
+                <Feather name="info" size={18} color="#3b82f6" />
+                <Text style={[styles.infoBoxText, { color: isDark ? '#e5e5e5' : '#1e1b2f' }]}>
+                  The user will be notified of this rejection reason.
+                </Text>
+              </View>
+            </View>
             
-            {canDelete && (
+            <View style={[styles.modalCardFooter, { borderTopColor: isDark ? '#333333' : '#edeef5' }]}>
               <TouchableOpacity 
-                style={[styles.actionButton, styles.deleteButton]}
-                onPress={handleDelete}
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setRejectModalVisible(false)}
               >
-                <Icon name="trash-outline" size={20} color="#fff" />
-                <Text style={styles.actionButtonText}>Delete</Text>
+                <Text style={[styles.modalCancelButtonText, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]}>Cancel</Text>
               </TouchableOpacity>
-            )}
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.modalRejectButton]}
+                onPress={handleReject}
+              >
+                <LinearGradient colors={['#e50914', '#b20710']} style={styles.modalConfirmGradient}>
+                  <Text style={styles.modalConfirmButtonText}>Reject</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
           </View>
-        )}
-      </View>
-    </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={deleteModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setDeleteModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: isDark ? '#1a1a1a' : '#fff' }]}>
+            <LinearGradient colors={['#e50914', '#b20710']} style={styles.modalCardHeader}>
+              <Feather name="trash-2" size={22} color="#fff" />
+              <Text style={styles.modalCardTitle}>Delete Item</Text>
+              <TouchableOpacity onPress={() => setDeleteModalVisible(false)}>
+                <Feather name="x" size={22} color="#fff" />
+              </TouchableOpacity>
+            </LinearGradient>
+            
+            <View style={styles.modalCardBody}>
+              <View style={[styles.infoBox, { backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2' }]}>
+                <Feather name="alert-triangle" size={24} color="#ef4444" />
+                <Text style={[styles.infoBoxText, { color: isDark ? '#e5e5e5' : '#1e1b2f' }]}>
+                  Are you sure you want to delete "{item?.item_name}"? This action cannot be undone.
+                </Text>
+              </View>
+            </View>
+            
+            <View style={[styles.modalCardFooter, { borderTopColor: isDark ? '#333333' : '#edeef5' }]}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setDeleteModalVisible(false)}
+              >
+                <Text style={[styles.modalCancelButtonText, { color: isDark ? '#b3b3b3' : '#666666' }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.modalRejectButton]}
+                onPress={handleDelete}
+                disabled={deleting}
+              >
+                <LinearGradient colors={['#ef4444', '#dc2626']} style={styles.modalConfirmGradient}>
+                  {deleting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalConfirmButtonText}>Delete</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (isDark) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#faf9fe',
   },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#faf9fe',
     padding: 20,
   },
   loadingText: {
     marginTop: 12,
-    color: '#5b5b7a',
     fontSize: 14,
   },
   emptyText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#5b5b7a',
   },
   backButton: {
     marginTop: 20,
+    borderRadius: 25,
+    overflow: 'hidden',
+  },
+  backButtonGradient: {
     paddingHorizontal: 24,
     paddingVertical: 12,
-    backgroundColor: '#7c3aed',
-    borderRadius: 25,
   },
   backButtonText: {
     color: '#fff',
     fontWeight: '600',
   },
+  backButtonSmall: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: isDark ? 'rgba(229,9,20,0.15)' : '#f3e8ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  accessDeniedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  accessDeniedIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  accessDeniedTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  accessDeniedText: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  header: {
+    paddingTop: Platform.OS === 'ios' ? 56 : 44,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  headerRight: {
+    width: 40,
+  },
   imageContainer: {
     position: 'relative',
     width: '100%',
     height: 300,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: isDark ? '#2a2a2a' : '#f0f0f0',
   },
   image: {
     width: '100%',
     height: '100%',
+  },
+  imageExpandButton: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   noImage: {
     width: '100%',
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
   },
   noImageText: {
     marginTop: 12,
-    color: '#999',
     fontSize: 14,
   },
   statusBadge: {
@@ -416,22 +1273,23 @@ const styles = StyleSheet.create({
   },
   statusText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
   },
   content: {
     padding: 20,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1e1b2f',
+    fontSize: 28,
+    fontWeight: '800',
     marginBottom: 12,
+    letterSpacing: -0.5,
   },
   metaRow: {
     flexDirection: 'row',
     gap: 16,
-    marginBottom: 20,
+    marginBottom: 12,
+    flexWrap: 'wrap',
   },
   metaItem: {
     flexDirection: 'row',
@@ -439,158 +1297,141 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   metaText: {
+    fontSize: 12,
+  },
+  ownerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+  },
+  ownerBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  adminBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+  },
+  adminBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  alertCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+  },
+  alertError: {
+    backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2',
+    borderLeftColor: '#ef4444',
+  },
+  alertWarning: {
+    backgroundColor: isDark ? 'rgba(245,197,24,0.15)' : '#fef3c7',
+    borderLeftColor: '#f59e0b',
+  },
+  alertContent: {
+    flex: 1,
+  },
+  alertTitle: {
     fontSize: 13,
-    color: '#5b5b7a',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  alertText: {
+    fontSize: 12,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 28,
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#1e1b2f',
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 12,
   },
   description: {
     fontSize: 14,
-    color: '#5b5b7a',
     lineHeight: 22,
-  },
-  locationCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#fff',
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#edeef5',
   },
-  locationInfo: {
+  detailsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 24,
+  },
+  detailCard: {
     flex: 1,
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#1e1b2f',
-    marginBottom: 4,
-  },
-  locationAction: {
-    fontSize: 12,
-    color: '#7c3aed',
-  },
-  reporterCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#fff',
-    padding: 16,
+    minWidth: '45%',
+    padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#edeef5',
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#7c3aed',
-    justifyContent: 'center',
-    alignItems: 'center',
+  detailCardFull: {
+    width: '100%',
   },
-  avatarText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  reporterInfo: {
-    flex: 1,
-  },
-  reporterName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1e1b2f',
+  detailLabel: {
+    fontSize: 10,
+    fontWeight: '700',
     marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  reporterDate: {
-    fontSize: 12,
-    color: '#5b5b7a',
+  detailValue: {
+    fontSize: 13,
+    fontWeight: '500',
   },
-  messageButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#ede9fe',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  matchCard: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#edeef5',
-    marginBottom: 12,
-    position: 'relative',
-  },
-  matchHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
-  },
-  matchScore: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  scoreHigh: {
-    backgroundColor: '#d1fae5',
-  },
-  scoreMedium: {
-    backgroundColor: '#fef3c7',
-  },
-  scoreLow: {
-    backgroundColor: '#dbeafe',
-  },
-  scoreText: {
+  youBadge: {
     fontSize: 11,
-    fontWeight: 'bold',
-    color: '#1e1b2f',
   },
-  matchItemName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1e1b2f',
-    flex: 1,
-  },
-  matchDescription: {
-    fontSize: 12,
-    color: '#5b5b7a',
-    marginBottom: 8,
-  },
-  matchArrow: {
-    position: 'absolute',
-    right: 16,
-    top: 16,
-  },
-  actionContainer: {
+  actionsGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
-    marginTop: 8,
-    marginBottom: 32,
   },
   actionButton: {
     flex: 1,
+    minWidth: 120,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     paddingVertical: 12,
-    borderRadius: 12,
+    paddingHorizontal: 16,
+    borderRadius: 40,
   },
   editButton: {
     backgroundColor: '#7c3aed',
   },
-  foundButton: {
+  approveButton: {
+    backgroundColor: '#10b981',
+  },
+  rejectButton: {
+    backgroundColor: '#ef4444',
+  },
+  successButton: {
     backgroundColor: '#10b981',
   },
   deleteButton: {
@@ -598,7 +1439,337 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  matchesBadge: {
+    backgroundColor: '#e50914',
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderRadius: 20,
+  },
+  matchesBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  matchCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  matchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  matchScore: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  scorehigh: {
+    backgroundColor: '#d1fae5',
+  },
+  scoremedium: {
+    backgroundColor: '#fef3c7',
+  },
+  scorelow: {
+    backgroundColor: '#dbeafe',
+  },
+  matchScoreText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1e1b2f',
+  },
+  matchInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  matchItemName: {
     fontSize: 14,
+    fontWeight: '700',
+  },
+  yourItemBadge: {
+    backgroundColor: isDark ? 'rgba(229,9,20,0.2)' : '#ede9fe',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 20,
+  },
+  yourItemBadgeText: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#e50914',
+  },
+  matchDescription: {
+    fontSize: 12,
+    marginBottom: 10,
+    lineHeight: 18,
+  },
+  matchFooter: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 10,
+  },
+  matchFooterText: {
+    fontSize: 10,
+  },
+  matchStatus: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+  },
+  matchStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+  },
+  matchStatusText: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  contactCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  contactProfile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    padding: 20,
+    borderBottomWidth: 1,
+  },
+  contactAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  contactAvatarGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contactAvatarText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  contactDetails: {
+    flex: 1,
+  },
+  contactName: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  contactRole: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  youIndicator: {
+    fontSize: 10,
+  },
+  contactInfoList: {
+    paddingHorizontal: 20,
+  },
+  contactInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  contactInfoText: {
+    fontSize: 13,
+    flex: 1,
+  },
+  messageButton: {
+    margin: 20,
+    marginTop: 0,
+    borderRadius: 40,
+    overflow: 'hidden',
+  },
+  messageButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  messageButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 8,
+  },
+  locationNameText: {
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 18,
+  },
+  mapContainer: {
+    height: 220,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 8,
+    borderWidth: 1,
+  },
+  map: {
+    flex: 1,
+  },
+  mapNoCoords: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  mapNoCoordsText: {
+    fontSize: 12,
+  },
+  directionsButton: {
+    marginTop: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  directionsButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+  },
+  directionsButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: width - 40,
+    height: '80%',
+    position: 'relative',
+  },
+  modalClose: {
+    position: 'absolute',
+    top: -40,
+    right: 0,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalImage: {
+    width: '100%',
+    height: '100%',
+  },
+  modalCard: {
+    width: width - 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  modalCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+  },
+  modalCardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    flex: 1,
+    marginLeft: 12,
+  },
+  modalCardBody: {
+    padding: 20,
+  },
+  modalLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  required: {
+    color: '#ef4444',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    textAlignVertical: 'top',
+    minHeight: 100,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  infoBoxText: {
+    flex: 1,
+    fontSize: 12,
+  },
+  modalCardFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 40,
+    alignItems: 'center',
+  },
+  modalCancelButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: isDark ? '#333333' : '#edeef5',
+  },
+  modalCancelButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalConfirmButton: {
+    overflow: 'hidden',
+  },
+  modalRejectButton: {
+    overflow: 'hidden',
+  },
+  modalConfirmGradient: {
+    width: '100%',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalConfirmButtonText: {
+    color: '#fff',
+    fontSize: 13,
     fontWeight: '600',
   },
 });
+

@@ -1,8 +1,8 @@
 // src/screens/items/CreateItemScreen.js
-import Icon from '@expo/vector-icons/Ionicons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { useEffect, useState } from 'react';
 import {
@@ -14,25 +14,28 @@ import {
   Modal,
   Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { foundItemsAPI, lostItemsAPI } from '../../api/items';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
 
 export default function CreateItemScreen({ route, navigation }) {
   const { type } = route.params;
   const { user, isAdmin } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
   const [loading, setLoading] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [gettingLocation, setGettingLocation] = useState(false);
+  const [locationError, setLocationError] = useState(null);
   const [formData, setFormData] = useState({
     item_name: '',
     description: '',
@@ -48,33 +51,21 @@ export default function CreateItemScreen({ route, navigation }) {
   });
 
   const categories = [
-    { value: 'Electronics', label: '📱 Electronics', icon: 'phone-portrait-outline' },
-    { value: 'Documents', label: '📄 Documents', icon: 'document-text-outline' },
-    { value: 'Jewelry', label: '💎 Jewelry', icon: 'diamond-outline' },
-    { value: 'Clothing', label: '👕 Clothing', icon: 'shirt-outline' },
-    { value: 'Bags', label: '🎒 Bags', icon: 'bag-outline' },
-    { value: 'Keys', label: '🔑 Keys', icon: 'key-outline' },
-    { value: 'Wallet', label: '👛 Wallet', icon: 'wallet-outline' },
-    { value: 'Books', label: '📚 Books', icon: 'book-outline' },
-    { value: 'Sports', label: '⚽ Sports', icon: 'basketball-outline' },
-    { value: 'Other', label: '📦 Other', icon: 'cube-outline' },
+    { value: 'Electronics', label: 'Electronics', icon: 'smartphone', emoji: '📱' },
+    { value: 'Documents', label: 'Documents', icon: 'file-text', emoji: '📄' },
+    { value: 'Jewelry', label: 'Jewelry', icon: 'diamond', emoji: '💎' },
+    { value: 'Clothing', label: 'Clothing', icon: 'shirt', emoji: '👕' },
+    { value: 'Bags', label: 'Bags', icon: 'briefcase', emoji: '🎒' },
+    { value: 'Keys', label: 'Keys', icon: 'key', emoji: '🔑' },
+    { value: 'Wallet', label: 'Wallet', icon: 'credit-card', emoji: '👛' },
+    { value: 'Books', label: 'Books', icon: 'book', emoji: '📚' },
+    { value: 'Sports', label: 'Sports', icon: 'activity', emoji: '⚽' },
+    { value: 'Other', label: 'Other', icon: 'box', emoji: '📦' },
   ];
 
   useEffect(() => {
-    loadThemePreference();
     requestMediaPermissions();
   }, []);
-
-  const loadThemePreference = async () => {
-    try {
-      const savedTheme = await AsyncStorage.getItem('foundify-theme');
-      if (savedTheme === 'dark') {
-        setIsDarkMode(true);
-      }
-    } catch (error) {
-      console.log('Error loading theme:', error);
-    }
-  };
 
   const requestMediaPermissions = async () => {
     try {
@@ -87,11 +78,21 @@ export default function CreateItemScreen({ route, navigation }) {
     }
   };
 
+  const normalizeUri = (uri) => {
+    if (!uri) return null;
+    if (uri.startsWith('content://') || uri.startsWith('http://') || uri.startsWith('https://')) {
+      return uri;
+    }
+    if (!uri.startsWith('file://')) {
+      return `file://${uri}`;
+    }
+    return uri;
+  };
+
   const handleImagePick = async () => {
     try {
-      // Launch image picker with Expo's ImagePicker
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
         base64: false,
@@ -100,30 +101,26 @@ export default function CreateItemScreen({ route, navigation }) {
 
       if (!result.canceled && result.assets && result.assets[0]) {
         const asset = result.assets[0];
-        
-        // Check file size (2MB limit) - approximate by checking if we can read the file
-        const fileInfo = await fetch(asset.uri).then(res => res.blob());
-        if (fileInfo.size > 2 * 1024 * 1024) {
+
+        if (asset.fileSize && asset.fileSize > 2 * 1024 * 1024) {
           Alert.alert('Error', 'File size must be less than 2MB');
           return;
         }
-        
-        // Get file extension
+
         const uriParts = asset.uri.split('.');
-        const fileExt = uriParts[uriParts.length - 1] || 'jpg';
+        const fileExt = uriParts[uriParts.length - 1].split('?')[0] || 'jpg';
         const fileName = `photo_${Date.now()}.${fileExt}`;
-        
-        setFormData({
-          ...formData,
+        const normalizedUri = normalizeUri(asset.uri);
+
+        setFormData(prev => ({
+          ...prev,
           photo: {
-            uri: asset.uri,
-            type: `image/${fileExt}`,
+            uri: normalizedUri,
+            type: asset.mimeType || `image/${fileExt}`,
             name: fileName,
           },
-          photoUri: asset.uri,
-        });
-        
-        console.log('Photo selected:', asset.uri);
+          photoUri: normalizedUri,
+        }));
       }
     } catch (error) {
       console.error('Image picker error:', error);
@@ -131,87 +128,118 @@ export default function CreateItemScreen({ route, navigation }) {
     }
   };
 
+  // FIXED: Improved location function with better error handling
   const getCurrentLocation = async () => {
     setGettingLocation(true);
+    setLocationError(null);
+    
     try {
+      // First, check and request permissions (this will also prompt the user)
       const { status } = await Location.requestForegroundPermissionsAsync();
+      
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please enable location services to use this feature.');
+        Alert.alert(
+          'Permission Required',
+          'Location permission is needed to get your current location. Please enable it in your device settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Location.openSettings() }
+          ]
+        );
         setGettingLocation(false);
         return;
       }
 
+      // Now try to get the current position
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
+        timeout: 15000, // Increased timeout
       });
       
       const lat = location.coords.latitude.toFixed(6);
       const lng = location.coords.longitude.toFixed(6);
       
-      setFormData({
-        ...formData,
+      setFormData(prev => ({
+        ...prev,
         latitude: lat,
         longitude: lng,
-      });
+      }));
       
+      // Try reverse geocoding to get address
       try {
         const reverseGeocode = await Location.reverseGeocodeAsync({
           latitude: parseFloat(lat),
           longitude: parseFloat(lng),
         });
         
-        if (reverseGeocode && reverseGeocode[0]) {
+        if (reverseGeocode && reverseGeocode.length > 0) {
           const address = reverseGeocode[0];
-          const formattedAddress = [
-            address.name,
-            address.street,
-            address.city,
-            address.region,
-          ].filter(Boolean).join(', ');
+          const addressParts = [];
           
-          if (type === 'lost') {
-            setFormData({ ...formData, lost_location: formattedAddress, latitude: lat, longitude: lng });
-          } else {
-            setFormData({ ...formData, found_location: formattedAddress, latitude: lat, longitude: lng });
-          }
+          if (address.name) addressParts.push(address.name);
+          if (address.street) addressParts.push(address.street);
+          if (address.district) addressParts.push(address.district);
+          if (address.city) addressParts.push(address.city);
+          if (address.region) addressParts.push(address.region);
+          
+          const formattedAddress = addressParts.join(', ');
+          const locationField = type === 'lost' ? 'lost_location' : 'found_location';
+          
+          setFormData(prev => ({
+            ...prev,
+            [locationField]: formattedAddress || `${lat}, ${lng}`,
+          }));
         } else {
-          if (type === 'lost') {
-            setFormData({ ...formData, lost_location: `${lat}, ${lng}`, latitude: lat, longitude: lng });
-          } else {
-            setFormData({ ...formData, found_location: `${lat}, ${lng}`, latitude: lat, longitude: lng });
-          }
+          const locationField = type === 'lost' ? 'lost_location' : 'found_location';
+          setFormData(prev => ({
+            ...prev,
+            [locationField]: `${lat}, ${lng}`,
+          }));
         }
       } catch (geoError) {
         console.log('Reverse geocoding failed:', geoError);
-        if (type === 'lost') {
-          setFormData({ ...formData, lost_location: `${lat}, ${lng}`, latitude: lat, longitude: lng });
-        } else {
-          setFormData({ ...formData, found_location: `${lat}, ${lng}`, latitude: lat, longitude: lng });
-        }
+        const locationField = type === 'lost' ? 'lost_location' : 'found_location';
+        setFormData(prev => ({
+          ...prev,
+          [locationField]: `${lat}, ${lng}`,
+        }));
       }
       
       Alert.alert('Success', 'Location retrieved successfully!');
     } catch (error) {
       console.error('Location error:', error);
-      Alert.alert('Error', 'Unable to retrieve location. Please enter manually.');
+      
+      // Handle specific error cases
+      let errorMessage = 'Unable to retrieve location.';
+      
+      if (error.code === Location.LocationErrorCode.LocationUnavailable) {
+        errorMessage = 'Location service is unavailable. Please check your device settings and try again.';
+      } else if (error.code === Location.LocationErrorCode.Timeout) {
+        errorMessage = 'Location request timed out. Please try again in an area with better GPS signal.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      setLocationError(errorMessage);
+      Alert.alert('Location Error', errorMessage);
     } finally {
       setGettingLocation(false);
     }
   };
 
   const clearLocation = () => {
-    setFormData({
-      ...formData,
+    setFormData(prev => ({
+      ...prev,
       latitude: '',
       longitude: '',
       lost_location: '',
       found_location: '',
-    });
-    Alert.alert('Success', 'Location fields cleared');
+    }));
+    setLocationError(null);
+    Alert.alert('Info', 'Location fields cleared');
   };
 
   const handleSubmit = async () => {
-    // Validate required fields
     if (!formData.item_name.trim()) {
       Alert.alert('Error', 'Please enter the item name');
       return;
@@ -252,39 +280,20 @@ export default function CreateItemScreen({ route, navigation }) {
         formDataToSend.append('longitude', formData.longitude);
       }
       
-      // Fix: Properly format the photo for FormData on real devices
       if (formData.photo && formData.photoUri) {
         const uri = formData.photoUri;
-        
-        // Get file name from URI or generate one
-        let filename = formData.photo.name || uri.split('/').pop() || `photo_${Date.now()}.jpg`;
-        
-        // For Android, the URI might need to be handled differently
-        let fileUri = uri;
-        if (Platform.OS === 'android') {
-          // For Android, ensure the URI starts with file:// or content://
-          if (!uri.startsWith('file://') && !uri.startsWith('content://')) {
-            fileUri = `file://${uri}`;
-          }
-        }
-        
-        // Determine mime type from filename
+        const filename = formData.photo.name || `photo_${Date.now()}.jpg`;
         const ext = filename.split('.').pop().toLowerCase();
         let mimeType = 'image/jpeg';
         if (ext === 'png') mimeType = 'image/png';
-        if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
         if (ext === 'gif') mimeType = 'image/gif';
         
         formDataToSend.append('photo', {
-          uri: fileUri,
+          uri,
           type: mimeType,
           name: filename,
         });
-        
-        console.log('Photo appended:', { uri: fileUri, type: mimeType, name: filename });
       }
-      
-      console.log('Submitting form data...');
       
       let response;
       if (type === 'lost') {
@@ -292,8 +301,6 @@ export default function CreateItemScreen({ route, navigation }) {
       } else {
         response = await foundItemsAPI.create(formDataToSend);
       }
-      
-      console.log('Response:', response.data);
       
       Alert.alert(
         'Success',
@@ -304,8 +311,6 @@ export default function CreateItemScreen({ route, navigation }) {
       );
     } catch (error) {
       console.error('Submit error:', error);
-      console.error('Error response:', error.response?.data);
-      
       let errorMessage = 'Failed to create item. Please try again.';
       if (error.response?.data?.message) {
         errorMessage = error.response.data.message;
@@ -315,324 +320,380 @@ export default function CreateItemScreen({ route, navigation }) {
         const errors = Object.values(error.response.data.errors).flat();
         errorMessage = errors.join('\n');
       }
-      
       Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  const styles = getStyles(isDarkMode);
+  const theme = isDark ? darkTheme : lightTheme;
+  const styles = getStyles(isDark, theme);
   const isLost = type === 'lost';
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView 
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+    <View style={[styles.root, { backgroundColor: theme.background }]}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
+      
+      <KeyboardAvoidingView 
+        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Page Header */}
-        <View style={styles.pageHeader}>
-          <View>
+        <ScrollView 
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+         
+          {/* Page Header */}
+          <View style={styles.pageHeader}>
             <View style={styles.titleRow}>
-              <Icon name={isLost ? "search" : "checkmark-circle"} size={28} color="#7c3aed" />
-              <Text style={styles.title}>
+              <View style={styles.iconBadge}>
+                <Feather name={isLost ? "search" : "check-circle"} size={28} color="#e50914" />
+              </View>
+              <Text style={[styles.title, { color: theme.text }]}>
                 {isLost ? 'Report Lost Item' : 'Report Found Item'}
               </Text>
             </View>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
               {isLost 
                 ? 'Help us help you find your lost item — provide as much detail as possible'
                 : 'Help someone find their belonging — provide accurate details'
               }
             </Text>
           </View>
-         
-        </View>
 
-        {/* Main Form Card */}
-        <View style={styles.formCard}>
-          <View style={styles.cardHeader}>
-            <Icon name="add-circle-outline" size={18} color="#7c3aed" />
-            <Text style={styles.cardTitle}>Item Details</Text>
-          </View>
-
-          <View style={styles.cardBody}>
-            {/* Photo Upload */}
-            <View style={styles.formSection}>
-              <Text style={styles.sectionTitle}>
-                <Icon name="camera-outline" size={16} color="#7c3aed" />
-                {'  '}Photo
+          {/* Main Form Card */}
+          <View style={[styles.formCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={[styles.cardHeader, { backgroundColor: theme.dark, borderBottomColor: theme.border }]}>
+              <Feather name="plus-circle" size={18} color="#e50914" />
+              <Text style={[styles.cardTitle, { color: theme.text }]}>
+                {isLost ? 'Lost Item Details' : 'Found Item Details'}
               </Text>
-              
-              <TouchableOpacity style={styles.photoUpload} onPress={handleImagePick}>
-                {formData.photoUri ? (
-                  <View style={styles.photoPreview}>
-                    <Image source={{ uri: formData.photoUri }} style={styles.previewImage} />
-                    <TouchableOpacity 
-                      style={styles.removePhoto}
-                      onPress={() => setFormData({ ...formData, photo: null, photoUri: null })}
-                    >
-                      <Icon name="close-circle" size={24} color="#ef4444" />
-                    </TouchableOpacity>
+            </View>
+
+            <View style={styles.cardBody}>
+              {/* Two Column Layout */}
+              <View style={styles.formGrid}>
+                {/* Left Column */}
+                <View>
+                  {/* Basic Information */}
+                  <View style={[styles.formSection, { borderBottomColor: theme.border }]}>
+                    <View style={styles.sectionHeader}>
+                      <Feather name="info" size={16} color="#e50914" />
+                      <Text style={[styles.sectionTitle, { color: theme.text }]}>Basic Information</Text>
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={[styles.formLabel, { color: theme.textSecondary }]}>
+                        Item Name <Text style={styles.required}>*</Text>
+                      </Text>
+                      <TextInput
+                        style={[styles.formInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+                        placeholder="e.g., iPhone 14 Pro, Brown Leather Wallet"
+                        placeholderTextColor={theme.textMuted}
+                        value={formData.item_name}
+                        onChangeText={(text) => setFormData({ ...formData, item_name: text })}
+                      />
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={[styles.formLabel, { color: theme.textSecondary }]}>
+                        Category <Text style={styles.required}>*</Text>
+                      </Text>
+                      <TouchableOpacity 
+                        style={[styles.categorySelector, { backgroundColor: theme.inputBg, borderColor: theme.border }]}
+                        onPress={() => setShowCategoryModal(true)}
+                      >
+                        <Text style={[styles.categorySelectorText, { color: theme.text }]}>
+                          {formData.category || 'Select Category'}
+                        </Text>
+                        <Feather name="chevron-down" size={16} color="#e50914" />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={[styles.formLabel, { color: theme.textSecondary }]}>
+                        Description <Text style={styles.required}>*</Text>
+                      </Text>
+                      <TextInput
+                        style={[styles.formInput, styles.textArea, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+                        placeholder="Describe your item in detail (color, brand, size, serial number, distinguishing marks, etc.)"
+                        placeholderTextColor={theme.textMuted}
+                        value={formData.description}
+                        onChangeText={(text) => setFormData({ ...formData, description: text })}
+                        multiline
+                        numberOfLines={5}
+                      />
+                      <View style={[styles.infoBoxSmall, { backgroundColor: isDark ? 'rgba(33,150,243,0.1)' : '#e3f2fd' }]}>
+                        <Feather name="info" size={12} color="#2196f3" />
+                        <Text style={[styles.hintText, { color: theme.textSecondary }]}>
+                          The more details you provide, the easier it is to match with found items.
+                        </Text>
+                      </View>
+                    </View>
                   </View>
-                ) : (
-                  <View style={styles.uploadPlaceholder}>
-                    <Icon name="cloud-upload-outline" size={48} color="#7c3aed" />
-                    <Text style={styles.uploadText}>Click to upload photo</Text>
-                    <Text style={styles.uploadHint}>JPG, PNG up to 2MB</Text>
+
+                  {/* Location Information (moved to left column) */}
+                  <View style={[styles.formSection, { borderBottomColor: theme.border }]}>
+                    <View style={styles.sectionHeader}>
+                      <Feather name="map-pin" size={16} color="#e50914" />
+                      <Text style={[styles.sectionTitle, { color: theme.text }]}>Location</Text>
+                    </View>
+
+                    <View style={[styles.infoBox, { backgroundColor: isDark ? 'rgba(229,9,20,0.1)' : '#fff5f5' }]}>
+                      <Feather name="info" size={16} color="#e50914" />
+                      <Text style={[styles.infoText, { color: theme.textSecondary }]}>
+                        Providing accurate location helps our matching system find nearby items.
+                      </Text>
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={[styles.formLabel, { color: theme.textSecondary }]}>
+                        {isLost ? 'Lost Location' : 'Found Location'} <Text style={styles.optional}>(Optional)</Text>
+                      </Text>
+                      <TextInput
+                        style={[styles.formInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+                        placeholder={isLost ? "e.g., Central Park, Starbucks on 5th Ave" : "e.g., Library, Bus Stop"}
+                        placeholderTextColor={theme.textMuted}
+                        value={isLost ? formData.lost_location : formData.found_location}
+                        onChangeText={(text) => {
+                          if (isLost) {
+                            setFormData(prev => ({ ...prev, lost_location: text }));
+                          } else {
+                            setFormData(prev => ({ ...prev, found_location: text }));
+                          }
+                        }}
+                      />
+                    </View>
+
+                    <View style={styles.coordinatesRow}>
+                      <View style={[styles.formGroup, styles.coordinateField]}>
+                        <Text style={[styles.formLabel, { color: theme.textSecondary }]}>Latitude</Text>
+                        <TextInput
+                          style={[styles.formInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+                          placeholder="40.7128"
+                          placeholderTextColor={theme.textMuted}
+                          value={formData.latitude?.toString()}
+                          onChangeText={(text) => setFormData(prev => ({ ...prev, latitude: text }))}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                      <View style={[styles.formGroup, styles.coordinateField]}>
+                        <Text style={[styles.formLabel, { color: theme.textSecondary }]}>Longitude</Text>
+                        <TextInput
+                          style={[styles.formInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+                          placeholder="-74.0060"
+                          placeholderTextColor={theme.textMuted}
+                          value={formData.longitude?.toString()}
+                          onChangeText={(text) => setFormData(prev => ({ ...prev, longitude: text }))}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.locationActions}>
+                      <TouchableOpacity 
+                        style={[styles.actionButton, styles.primaryButton]} 
+                        onPress={getCurrentLocation}
+                        disabled={gettingLocation}
+                      >
+                        {gettingLocation ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Feather name="navigation" size={16} color="#fff" />
+                            <Text style={styles.actionButtonText}>Use My Location</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.actionButton, styles.secondaryButton, { borderColor: theme.border }]} 
+                        onPress={clearLocation}
+                      >
+                        <Feather name="x" size={16} color="#e50914" />
+                        <Text style={[styles.actionButtonText, { color: '#e50914' }]}>Clear</Text>
+                      </TouchableOpacity>
+                    </View>
+                    
+                    {locationError && (
+                      <View style={[styles.locationErrorBox, { backgroundColor: isDark ? 'rgba(229,9,20,0.15)' : '#fee' }]}>
+                        <Feather name="alert-circle" size={16} color="#e50914" />
+                        <Text style={[styles.locationErrorText, { color: '#e50914' }]}>{locationError}</Text>
+                      </View>
+                    )}
                   </View>
-                )}
-              </TouchableOpacity>
-            </View>
+                </View>
 
-            {/* Basic Information */}
-            <View style={styles.formSection}>
-              <Text style={styles.sectionTitle}>
-                <Icon name="information-circle-outline" size={16} color="#7c3aed" />
-                {'  '}Basic Information
-              </Text>
+                {/* Right Column */}
+                <View>
+                  {/* Date & Photo (moved to right column) */}
+                  <View style={[styles.formSection, { borderBottomColor: theme.border }]}>
+                    <View style={styles.sectionHeader}>
+                      <Feather name="calendar" size={16} color="#e50914" />
+                      <Text style={[styles.sectionTitle, { color: theme.text }]}>Date & Photo</Text>
+                    </View>
 
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>
-                  Item Name <Text style={styles.required}>*</Text>
-                </Text>
-                <TextInput
-                  style={styles.formInput}
-                  placeholder="e.g., iPhone 14 Pro, Brown Leather Wallet"
-                  placeholderTextColor={isDarkMode ? '#938bb0' : '#7e7b9a'}
-                  value={formData.item_name}
-                  onChangeText={(text) => setFormData({ ...formData, item_name: text })}
-                />
+                    <View style={styles.formGroup}>
+                      <Text style={[styles.formLabel, { color: theme.textSecondary }]}>
+                        {isLost ? 'Date Lost' : 'Date Found'} <Text style={styles.required}>*</Text>
+                      </Text>
+                      <TouchableOpacity 
+                        style={[styles.dateButton, { backgroundColor: theme.inputBg, borderColor: theme.border }]}
+                        onPress={() => setShowDatePicker(true)}
+                      >
+                        <Feather name="calendar" size={18} color="#e50914" />
+                        <Text style={[styles.dateText, { color: theme.text }]}>
+                          {isLost 
+                            ? formData.date_lost.toLocaleDateString()
+                            : formData.date_found.toLocaleDateString()
+                          }
+                        </Text>
+                      </TouchableOpacity>
+                      
+                      {showDatePicker && (
+                        <DateTimePicker
+                          value={isLost ? formData.date_lost : formData.date_found}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          onChange={(event, selectedDate) => {
+                            setShowDatePicker(Platform.OS === 'ios');
+                            if (selectedDate) {
+                              if (isLost) {
+                                setFormData(prev => ({ ...prev, date_lost: selectedDate }));
+                              } else {
+                                setFormData(prev => ({ ...prev, date_found: selectedDate }));
+                              }
+                            }
+                          }}
+                        />
+                      )}
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={[styles.formLabel, { color: theme.textSecondary }]}>
+                        Photo <Text style={styles.optional}>(Optional)</Text>
+                      </Text>
+                      
+                      {formData.photoUri ? (
+                        <TouchableOpacity
+                          style={styles.photoPreviewContainer}
+                          onPress={handleImagePick}
+                          activeOpacity={0.9}
+                        >
+                          <Image
+                            source={{ uri: formData.photoUri }}
+                            style={styles.previewImage}
+                            resizeMode="cover"
+                          />
+                          <LinearGradient
+                            colors={['transparent', 'rgba(0,0,0,0.7)']}
+                            style={styles.photoOverlay}
+                          >
+                            <Feather name="camera" size={18} color="#fff" />
+                            <Text style={styles.photoOverlayText}>Tap to change</Text>
+                          </LinearGradient>
+                          <TouchableOpacity
+                            style={styles.removePhoto}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              setFormData(prev => ({ ...prev, photo: null, photoUri: null }));
+                            }}
+                          >
+                            <Feather name="x-circle" size={28} color="#e50914" />
+                          </TouchableOpacity>
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity 
+                          style={[styles.uploadPlaceholder, { borderColor: theme.border, backgroundColor: theme.inputBg }]} 
+                          onPress={handleImagePick}
+                        >
+                          <Feather name="cloud-upload" size={48} color="#e50914" />
+                          <Text style={[styles.uploadText, { color: theme.text }]}>Click to upload photo</Text>
+                          <Text style={[styles.uploadHint, { color: theme.textMuted }]}>JPG, PNG up to 2MB</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Photo Preview */}
+                  <View style={[styles.formSection, { borderBottomColor: theme.border }]}>
+                    <View style={styles.sectionHeader}>
+                      <Feather name="image" size={16} color="#e50914" />
+                      <Text style={[styles.sectionTitle, { color: theme.text }]}>Photo Preview</Text>
+                    </View>
+
+                    <View style={[styles.photoPreview, { borderColor: theme.border, backgroundColor: theme.inputBg }]}>
+                      {formData.photoUri ? (
+                        <Image source={{ uri: formData.photoUri }} style={styles.previewThumb} resizeMode="cover" />
+                      ) : (
+                        <View style={styles.previewPlaceholder}>
+                          <Feather name="image" size={48} color={theme.textMuted} />
+                          <Text style={[styles.previewPlaceholderText, { color: theme.textMuted }]}>No photo selected</Text>
+                          <Text style={[styles.previewPlaceholderSmall, { color: theme.textMuted }]}>Preview will appear here</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </View>
               </View>
 
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>
-                  Category <Text style={styles.required}>*</Text>
-                </Text>
+              {/* Form Actions */}
+              <View style={[styles.formActions, { borderTopColor: theme.border }]}>
                 <TouchableOpacity 
-                  style={styles.categorySelector}
-                  onPress={() => setShowCategoryModal(true)}
+                  style={[styles.submitButton, styles.cancelButton, { backgroundColor: theme.inputBg, borderColor: theme.border }]} 
+                  onPress={() => navigation.goBack()}
                 >
-                  <Text style={styles.categorySelectorText}>
-                    {formData.category || 'Select Category'}
-                  </Text>
-                  <Icon name="chevron-down" size={16} color="#7c3aed" />
+                  <Feather name="x" size={18} color={theme.textSecondary} />
+                  <Text style={[styles.cancelButtonText, { color: theme.textSecondary }]}>Cancel</Text>
                 </TouchableOpacity>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>
-                  Description <Text style={styles.required}>*</Text>
-                </Text>
-                <TextInput
-                  style={[styles.formInput, styles.textArea]}
-                  placeholder="Describe your item in detail (color, brand, size, serial number, distinguishing marks, etc.)"
-                  placeholderTextColor={isDarkMode ? '#938bb0' : '#7e7b9a'}
-                  value={formData.description}
-                  onChangeText={(text) => setFormData({ ...formData, description: text })}
-                  multiline
-                  numberOfLines={5}
-                />
-                <View style={styles.formHint}>
-                  <Icon name="information-circle-outline" size={12} color="#7c3aed" />
-                  <Text style={styles.hintText}>
-                    The more details you provide, the easier it is to match with found items.
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Date Section */}
-            <View style={styles.formSection}>
-              <Text style={styles.sectionTitle}>
-                <Icon name="calendar-outline" size={16} color="#7c3aed" />
-                {'  '}Date
-              </Text>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>
-                  {isLost ? 'Date Lost' : 'Date Found'} <Text style={styles.required}>*</Text>
-                </Text>
                 <TouchableOpacity 
-                  style={styles.dateButton}
-                  onPress={() => setShowDatePicker(true)}
+                  style={[styles.submitButton, styles.primarySubmit]} 
+                  onPress={handleSubmit}
+                  disabled={loading}
                 >
-                  <Icon name="calendar-outline" size={18} color="#7c3aed" />
-                  <Text style={styles.dateText}>
-                    {isLost 
-                      ? formData.date_lost.toLocaleDateString()
-                      : formData.date_found.toLocaleDateString()
-                    }
-                  </Text>
-                </TouchableOpacity>
-                
-                {showDatePicker && (
-                  <DateTimePicker
-                    value={isLost ? formData.date_lost : formData.date_found}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={(event, selectedDate) => {
-                      setShowDatePicker(false);
-                      if (selectedDate) {
-                        if (isLost) {
-                          setFormData({ ...formData, date_lost: selectedDate });
-                        } else {
-                          setFormData({ ...formData, date_found: selectedDate });
-                        }
-                      }
-                    }}
-                  />
-                )}
-              </View>
-            </View>
-
-            {/* Location Section */}
-            <View style={styles.formSection}>
-              <Text style={styles.sectionTitle}>
-                <Icon name="location-outline" size={16} color="#7c3aed" />
-                {'  '}Location
-              </Text>
-
-              <View style={styles.infoBox}>
-                <Icon name="information-circle-outline" size={16} color="#3b82f6" />
-                <Text style={styles.infoText}>
-                  Providing accurate location helps our matching system find nearby items.
-                </Text>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>
-                  {isLost ? 'Lost Location' : 'Found Location'} <Text style={styles.optional}>(Optional)</Text>
-                </Text>
-                <TextInput
-                  style={styles.formInput}
-                  placeholder={isLost ? "e.g., Central Park, Starbucks on 5th Ave" : "e.g., Library, Bus Stop"}
-                  placeholderTextColor={isDarkMode ? '#938bb0' : '#7e7b9a'}
-                  value={isLost ? formData.lost_location : formData.found_location}
-                  onChangeText={(text) => {
-                    if (isLost) {
-                      setFormData({ ...formData, lost_location: text });
-                    } else {
-                      setFormData({ ...formData, found_location: text });
-                    }
-                  }}
-                />
-              </View>
-
-              <View style={styles.coordinatesRow}>
-                <View style={[styles.formGroup, styles.coordinateField]}>
-                  <Text style={styles.formLabel}>Latitude</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="40.7128"
-                    placeholderTextColor={isDarkMode ? '#938bb0' : '#7e7b9a'}
-                    value={formData.latitude?.toString()}
-                    onChangeText={(text) => setFormData({ ...formData, latitude: text })}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-                <View style={[styles.formGroup, styles.coordinateField]}>
-                  <Text style={styles.formLabel}>Longitude</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="-74.0060"
-                    placeholderTextColor={isDarkMode ? '#938bb0' : '#7e7b9a'}
-                    value={formData.longitude?.toString()}
-                    onChangeText={(text) => setFormData({ ...formData, longitude: text })}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.locationActions}>
-                <TouchableOpacity 
-                  style={[styles.actionButton, styles.primaryButton]} 
-                  onPress={getCurrentLocation}
-                  disabled={gettingLocation}
-                >
-                  {gettingLocation ? (
+                  {loading ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <>
-                      <Icon name="location-outline" size={16} color="#fff" />
-                      <Text style={styles.actionButtonText}>Use My Location</Text>
+                      <Feather name="send" size={18} color="#fff" />
+                      <Text style={styles.submitButtonText}>
+                        {isLost ? 'Report Lost Item' : 'Report Found Item'}
+                      </Text>
                     </>
                   )}
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.actionButton, styles.secondaryButton]} 
-                  onPress={clearLocation}
-                >
-                  <Icon name="close-outline" size={16} color="#7c3aed" />
-                  <Text style={[styles.actionButtonText, { color: '#7c3aed' }]}>Clear</Text>
-                </TouchableOpacity>
               </View>
             </View>
+          </View>
 
-            {/* Form Actions */}
-            <View style={styles.formActions}>
-              <TouchableOpacity 
-                style={[styles.submitButton, styles.cancelButton]} 
-                onPress={() => navigation.goBack()}
-              >
-                <Icon name="close-outline" size={18} color="#fff" />
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.submitButton, styles.primarySubmit]} 
-                onPress={handleSubmit}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Icon name="send-outline" size={18} color="#fff" />
-                    <Text style={styles.submitButtonText}>
-                      {isLost ? 'Report Lost Item' : 'Report Found Item'}
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
+          {/* Help Card */}
+          <View style={[styles.helpCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={[styles.cardHeader, { backgroundColor: theme.dark, borderBottomColor: theme.border }]}>
+              <Feather name="lightbulb" size={18} color="#f5c518" />
+              <Text style={[styles.cardTitle, { color: theme.text }]}>Tips for Better Results</Text>
+            </View>
+            <View style={styles.tipsList}>
+              {[
+                'Report as soon as possible — the sooner you report, the better your chances',
+                'Include clear, high-quality photos of your item',
+                'Mention unique details like serial numbers, engravings, or custom features',
+                'Be specific about the exact location and time you lost/found it',
+                'Check your notifications regularly for potential match alerts',
+                'Keep your contact information up to date in your profile',
+              ].map((tip, i) => (
+                <View key={i} style={[styles.tipItem, { borderBottomColor: theme.border }]}>
+                  <Feather name="check-circle" size={14} color="#2e7d32" />
+                  <Text style={[styles.tipText, { color: theme.textSecondary }]}>{tip}</Text>
+                </View>
+              ))}
             </View>
           </View>
-        </View>
 
-        {/* Tips Card */}
-        <View style={[styles.formCard, styles.tipsCard]}>
-          <View style={styles.cardHeader}>
-            <Icon name="bulb-outline" size={18} color="#f59e0b" />
-            <Text style={styles.cardTitle}>Tips for Better Results</Text>
-          </View>
-          <View style={styles.tipsList}>
-            <View style={styles.tipItem}>
-              <Icon name="checkmark-circle-outline" size={14} color="#10b981" />
-              <Text style={styles.tipText}>Report as soon as possible — the sooner you report, the better your chances</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Icon name="checkmark-circle-outline" size={14} color="#10b981" />
-              <Text style={styles.tipText}>Include clear, high-quality photos of your item</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Icon name="checkmark-circle-outline" size={14} color="#10b981" />
-              <Text style={styles.tipText}>Mention unique details like serial numbers, engravings, or custom features</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Icon name="checkmark-circle-outline" size={14} color="#10b981" />
-              <Text style={styles.tipText}>Be specific about the exact location and time you lost/found it</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Icon name="checkmark-circle-outline" size={14} color="#10b981" />
-              <Text style={styles.tipText}>Check your notifications regularly for potential match alerts</Text>
-            </View>
-          </View>
-        </View>
-      </ScrollView>
+          {/* Bottom Spacing */}
+          <View style={styles.bottomSpacing} />
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Category Selection Modal */}
       <Modal
@@ -646,11 +707,11 @@ export default function CreateItemScreen({ route, navigation }) {
           activeOpacity={1} 
           onPress={() => setShowCategoryModal(false)}
         >
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Category</Text>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Select Category</Text>
               <TouchableOpacity onPress={() => setShowCategoryModal(false)}>
-                <Icon name="close" size={24} color="#7c3aed" />
+                <Feather name="x" size={24} color="#e50914" />
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -659,22 +720,24 @@ export default function CreateItemScreen({ route, navigation }) {
                   key={cat.value}
                   style={[
                     styles.categoryOption,
+                    { borderColor: theme.border },
                     formData.category === cat.value && styles.categoryOptionActive,
                   ]}
                   onPress={() => {
-                    setFormData({ ...formData, category: cat.value });
+                    setFormData(prev => ({ ...prev, category: cat.value }));
                     setShowCategoryModal(false);
                   }}
                 >
-                  <Icon name={cat.icon} size={20} color={formData.category === cat.value ? '#fff' : '#7c3aed'} />
+                  <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
                   <Text style={[
                     styles.categoryOptionText,
+                    { color: theme.text },
                     formData.category === cat.value && styles.categoryOptionTextActive,
                   ]}>
                     {cat.label}
                   </Text>
                   {formData.category === cat.value && (
-                    <Icon name="checkmark" size={18} color="#fff" />
+                    <Feather name="check" size={18} color="#fff" />
                   )}
                 </TouchableOpacity>
               ))}
@@ -682,27 +745,74 @@ export default function CreateItemScreen({ route, navigation }) {
           </View>
         </TouchableOpacity>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
-const getStyles = (isDarkMode) => StyleSheet.create({
-  container: {
+// Themes matching web version
+const darkTheme = {
+  background: '#141414',
+  card: '#1a1a1a',
+  dark: '#0a0a0a',
+  inputBg: 'rgba(255,255,255,0.05)',
+  text: '#ffffff',
+  textSecondary: '#e5e5e5',
+  textMuted: '#b3b3b3',
+  border: '#333333',
+};
+
+const lightTheme = {
+  background: '#f5f5f5',
+  card: '#ffffff',
+  dark: '#fafafa',
+  inputBg: 'rgba(0,0,0,0.02)',
+  text: '#1a1a1a',
+  textSecondary: '#333333',
+  textMuted: '#666666',
+  border: '#e0e0e0',
+};
+
+const getStyles = (isDark, theme) => StyleSheet.create({
+  root: {
     flex: 1,
-    backgroundColor: isDarkMode ? '#12101c' : '#faf9fe',
   },
-  scrollView: {
+  keyboardView: {
     flex: 1,
   },
-  pageHeader: {
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    alignItems: 'center',
+    paddingHorizontal: 24,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
+    zIndex: 10,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  themeToggle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(229,9,20,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageHeader: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 24,
   },
   titleRow: {
     flexDirection: 'row',
@@ -710,43 +820,36 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     gap: 12,
     marginBottom: 8,
   },
+  iconBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(229,9,20,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 14,
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-    maxWidth: width - 120,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: isDarkMode ? '#2d2648' : '#ede9fe',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 40,
-  },
-  backText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#7c3aed',
+    lineHeight: 20,
   },
   formCard: {
-    backgroundColor: isDarkMode ? '#191624' : '#ffffff',
     borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    borderRadius: 20,
-    marginHorizontal: 16,
-    marginTop: 20,
+    borderRadius: 8,
+    marginHorizontal: 24,
     marginBottom: 16,
     overflow: 'hidden',
   },
-  tipsCard: {
-    marginBottom: 30,
+  helpCard: {
+    borderWidth: 1,
+    borderRadius: 8,
+    marginHorizontal: 24,
+    marginBottom: 16,
+    overflow: 'hidden',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -754,31 +857,35 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     gap: 10,
     paddingHorizontal: 20,
     paddingVertical: 16,
-    backgroundColor: isDarkMode ? '#12101c' : '#faf9fe',
     borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
   },
   cardTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   cardBody: {
     padding: 20,
   },
+  formGrid: {
+    gap: 24,
+  },
   formSection: {
     marginBottom: 24,
-    paddingBottom: 24,
     borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-    marginBottom: 16,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
   formGroup: {
     marginBottom: 16,
@@ -786,54 +893,103 @@ const getStyles = (isDarkMode) => StyleSheet.create({
   formLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
     marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   required: {
-    color: '#ef4444',
+    color: '#e50914',
   },
   optional: {
     fontSize: 10,
-    color: isDarkMode ? '#938bb0' : '#7e7b9a',
     fontWeight: '400',
+    textTransform: 'none',
   },
   formInput: {
-    backgroundColor: isDarkMode ? '#1e1a2f' : '#ffffff',
     borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    borderRadius: 12,
+    borderRadius: 4,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
   },
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
   },
-  formHint: {
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  infoBoxSmall: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 6,
     marginTop: 8,
+    padding: 10,
+    borderRadius: 4,
+  },
+  infoText: {
+    fontSize: 12,
+    flex: 1,
   },
   hintText: {
     fontSize: 11,
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
     flex: 1,
   },
-  photoUpload: {
-    marginBottom: 8,
+  categorySelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  photoPreview: {
-    position: 'relative',
-    borderRadius: 12,
+  categorySelectorText: {
+    fontSize: 14,
+  },
+  dateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  dateText: {
+    fontSize: 14,
+  },
+  photoPreviewContainer: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
     overflow: 'hidden',
+    position: 'relative',
   },
   previewImage: {
     width: '100%',
-    height: 200,
-    borderRadius: 12,
+    height: '100%',
+  },
+  photoOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  photoOverlayText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   removePhoto: {
     position: 'absolute',
@@ -841,71 +997,24 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     right: 8,
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 20,
-    padding: 4,
+    padding: 2,
   },
   uploadPlaceholder: {
     borderWidth: 2,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
     borderStyle: 'dashed',
-    borderRadius: 12,
-    padding: 32,
+    borderRadius: 8,
+    paddingVertical: 40,
+    paddingHorizontal: 32,
     alignItems: 'center',
-    backgroundColor: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
   },
   uploadText: {
     fontSize: 13,
     fontWeight: '600',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
     marginTop: 12,
     marginBottom: 4,
   },
   uploadHint: {
     fontSize: 10,
-    color: isDarkMode ? '#938bb0' : '#7e7b9a',
-  },
-  categorySelector: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: isDarkMode ? '#1e1a2f' : '#ffffff',
-    borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  categorySelectorText: {
-    fontSize: 14,
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-  },
-  dateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: isDarkMode ? '#1e1a2f' : '#ffffff',
-    borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  dateText: {
-    fontSize: 14,
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-  },
-  infoBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: isDarkMode ? 'rgba(59, 130, 246, 0.15)' : '#dbeafe',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  infoText: {
-    fontSize: 12,
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-    flex: 1,
   },
   coordinatesRow: {
     flexDirection: 'row',
@@ -926,29 +1035,66 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     gap: 8,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 40,
+    borderRadius: 4,
     flex: 1,
   },
   primaryButton: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: '#e50914',
   },
   secondaryButton: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#7c3aed',
   },
   actionButtonText: {
     fontSize: 13,
     fontWeight: '600',
     color: '#fff',
   },
+  locationErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 4,
+    padding: 10,
+    marginTop: 12,
+  },
+  locationErrorText: {
+    fontSize: 12,
+    flex: 1,
+  },
+  photoPreview: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    minHeight: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  previewThumb: {
+    width: '100%',
+    height: 220,
+  },
+  previewPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  previewPlaceholderText: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 12,
+  },
+  previewPlaceholderSmall: {
+    fontSize: 10,
+    marginTop: 4,
+  },
   formActions: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 8,
-    paddingTop: 16,
+    marginTop: 24,
+    paddingTop: 24,
     borderTopWidth: 1,
-    borderTopColor: isDarkMode ? '#2a2438' : '#edeef5',
   },
   submitButton: {
     flexDirection: 'row',
@@ -956,14 +1102,14 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     paddingVertical: 14,
-    borderRadius: 40,
+    borderRadius: 4,
     flex: 1,
   },
   primarySubmit: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: '#e50914',
   },
   cancelButton: {
-    backgroundColor: isDarkMode ? '#2a2438' : '#f0f0f0',
+    borderWidth: 1,
   },
   submitButtonText: {
     fontSize: 14,
@@ -973,7 +1119,6 @@ const getStyles = (isDarkMode) => StyleSheet.create({
   cancelButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
   },
   tipsList: {
     padding: 16,
@@ -984,23 +1129,23 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     gap: 10,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
   },
   tipText: {
     fontSize: 12,
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
     flex: 1,
     lineHeight: 18,
   },
+  bottomSpacing: {
+    height: 20,
+  },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: isDarkMode ? '#191624' : '#ffffff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
     padding: 20,
     maxHeight: '70%',
   },
@@ -1011,12 +1156,10 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     marginBottom: 20,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
   },
   categoryOption: {
     flexDirection: 'row',
@@ -1024,18 +1167,19 @@ const getStyles = (isDarkMode) => StyleSheet.create({
     gap: 12,
     paddingVertical: 14,
     paddingHorizontal: 12,
-    borderRadius: 12,
+    borderRadius: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
   },
   categoryOptionActive: {
-    backgroundColor: '#7c3aed',
-    borderColor: '#7c3aed',
+    backgroundColor: '#e50914',
+    borderColor: '#e50914',
+  },
+  categoryEmoji: {
+    fontSize: 20,
   },
   categoryOptionText: {
     fontSize: 15,
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
     flex: 1,
   },
   categoryOptionTextActive: {

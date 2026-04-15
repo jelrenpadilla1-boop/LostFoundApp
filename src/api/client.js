@@ -4,7 +4,7 @@ import { Alert } from 'react-native';
 import { getToken, removeToken, removeUser } from '../utils/tokenStorage';
 
 // Get your IP address from your computer
-const API_BASE_URL = 'http://10.214.114.132:8092/api';
+const API_BASE_URL = 'http://10.116.78.132:8092/api';
 
 // Create a navigation reference to use outside of React components
 let navigationRef = null;
@@ -128,13 +128,20 @@ api.interceptors.response.use(
     
     // Define non-critical endpoints that shouldn't trigger logout on 401
     const nonCriticalEndpoints = [
-      '/users', 
-      '/users/search', 
-      '/profile/stats', 
+      '/users',
+      '/users/search',
+      '/profile/stats',
       '/notifications',
       '/dashboard/stats',
       '/dashboard/recent-items'
     ];
+
+    // 419 = CSRF token mismatch — the route is on web middleware instead of api.
+    // Silently ignore for read-receipt and other fire-and-forget endpoints.
+    if (error.response?.status === 419) {
+      console.warn(`⚠️ 419 CSRF on ${originalRequest?.url} — route should be in routes/api.php`);
+      return Promise.resolve({ data: { success: false, message: 'csrf' } });
+    }
     
     const isNonCritical = nonCriticalEndpoints.some(endpoint => 
       originalRequest?.url?.includes(endpoint)

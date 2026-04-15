@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs sed:*)",
+      "Read(///wsl.localhost/Ubuntu//**)",
+      "Read(///wsl$/Ubuntu//**)",
+      "Read(///wsl.localhost/Ubuntu/lost-and-found-system/app/Http/Middleware/**)",
+      "Read(///wsl.localhost/Ubuntu/lost-and-found-system/app/Http/**)",
+      "Bash(wsl -d Ubuntu -e bash -c \"cd /lost-and-found-system && php artisan route:clear && php artisan cache:clear\")",
+      "Bash(wsl -d Ubuntu -e bash -c \"cd /lost-and-found-system && php artisan route:clear 2>&1 | tail -5; php artisan cache:clear 2>&1 | tail -5\")",
+      "Bash(wsl -d Ubuntu -e bash -c \"cd /lost-and-found-system && php -r \"\"require ''bootstrap/app.php''; echo ''ok'';\"\"\")",
+      "Bash(wsl -d Ubuntu -e bash -c \"ls /lost-and-found-system/bootstrap/cache/\")"
+    ]
+  }
+}

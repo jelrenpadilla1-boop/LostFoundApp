@@ -1,26 +1,30 @@
 // src/screens/messages/MessagesScreen.js
-import Icon from '@expo/vector-icons/Ionicons';
+import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
     Image,
     Modal,
+    Platform,
     RefreshControl,
+    StatusBar,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import { messagesAPI } from '../../api/messages';
 import { usersAPI } from '../../api/users';
 import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
+import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE_URL = 'http://10.214.114.132:8092';
+const API_BASE_URL = 'http://10.116.78.132:8092';
 
 export default function MessagesScreen({ navigation }) {
     const [conversations, setConversations] = useState([]);
@@ -30,6 +34,18 @@ export default function MessagesScreen({ navigation }) {
     const [users, setUsers] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const { user } = useAuth();
+    const { addNotificationListener } = useSocket();
+    const { isDark, toggleTheme } = useTheme();
+
+    // Refresh conversation list when a new message or match notification arrives
+    useEffect(() => {
+        const remove = addNotificationListener((data) => {
+            if (data.type === 'message' || data.type === 'match') {
+                loadConversations();
+            }
+        });
+        return remove;
+    }, [addNotificationListener]);
 
     useFocusEffect(
         useCallback(() => {
@@ -79,32 +95,12 @@ export default function MessagesScreen({ navigation }) {
 
     const loadUsers = async () => {
         try {
-            console.log('Loading users...');
             const response = await usersAPI.getUsers();
-            console.log('Users response:', response);
-            
-            if (response && response.success === false && response.message === 'Unauthenticated') {
-                console.log('Users API returned 401, but continuing');
+            if (!response.success) {
                 setUsers([]);
                 return;
             }
-            
-            let usersData = [];
-            if (response.success && response.data) {
-                usersData = response.data;
-            } else if (response.data && response.data.success === true) {
-                usersData = response.data.users || response.data.data || [];
-            } else if (response.data && response.data.users) {
-                usersData = response.data.users;
-            } else if (response.data && response.data.data) {
-                usersData = response.data.data;
-            } else if (Array.isArray(response.data)) {
-                usersData = response.data;
-            } else if (Array.isArray(response)) {
-                usersData = response;
-            }
-            
-            usersData = usersData.filter(u => u.id !== user?.id);
+            const usersData = (response.data || []).filter(u => u.id !== user?.id);
             console.log('Users loaded:', usersData.length);
             setUsers(usersData);
         } catch (error) {
@@ -186,6 +182,8 @@ export default function MessagesScreen({ navigation }) {
         u.name && u.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
+    const styles = getStyles(isDark);
+
     const renderConversation = ({ item }) => {
         const otherUser = getOtherUser(item);
         const lastMessage = item.last_message || item.lastMessage;
@@ -195,7 +193,10 @@ export default function MessagesScreen({ navigation }) {
 
         return (
             <TouchableOpacity
-                style={styles.conversationCard}
+                style={[styles.conversationCard, { 
+                    backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+                    borderColor: isDark ? '#333333' : '#edeef5'
+                }]}
                 onPress={() => navigation.navigate('Chat', { conversationId: item.id })}
                 activeOpacity={0.7}
             >
@@ -206,7 +207,7 @@ export default function MessagesScreen({ navigation }) {
                             style={styles.avatar}
                         />
                     ) : (
-                        <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                        <View style={[styles.avatarPlaceholder, { backgroundColor: '#e50914' }]}>
                             <Text style={styles.avatarText}>
                                 {otherUser.name?.charAt(0).toUpperCase() || '?'}
                             </Text>
@@ -218,13 +219,15 @@ export default function MessagesScreen({ navigation }) {
                 </View>
                 <View style={styles.conversationInfo}>
                     <View style={styles.conversationHeader}>
-                        <Text style={styles.userName} numberOfLines={1}>
+                        <Text style={[styles.userName, { color: isDark ? '#ffffff' : '#1e1b2f' }]} numberOfLines={1}>
                             {otherUser.name}
                         </Text>
-                        <Text style={styles.timeText}>{getLastMessageTime(item)}</Text>
+                        <Text style={[styles.timeText, { color: isDark ? '#666666' : '#94a3b8' }]}>
+                            {getLastMessageTime(item)}
+                        </Text>
                     </View>
                     <View style={styles.messagePreview}>
-                        <Text style={styles.lastMessage} numberOfLines={1}>
+                        <Text style={[styles.lastMessage, { color: isDark ? '#b3b3b3' : '#5b5b7a' }]} numberOfLines={1}>
                             {lastMessage?.content || 'No messages yet'}
                         </Text>
                         {unreadCount > 0 && (
@@ -240,184 +243,213 @@ export default function MessagesScreen({ navigation }) {
         );
     };
 
-    if (loading) {
+    if (loading && !refreshing) {
         return (
-            <View style={styles.center}>
-                <ActivityIndicator size="large" color="#7c3aed" />
-                <Text style={styles.loadingText}>Loading conversations...</Text>
+            <View style={[styles.center, { backgroundColor: isDark ? '#141414' : '#f8fafc' }]}>
+                <ActivityIndicator size="large" color="#e50914" />
+                <Text style={[styles.loadingText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>Loading conversations...</Text>
             </View>
         );
     }
 
     return (
-        <View style={styles.container}>
-            {/* Header - Clean White Background */}
-            <View style={styles.header}>
-                <View style={styles.headerContent}>
-                    <Text style={styles.headerTitle}>Messages</Text>
-                    <Text style={styles.headerSubtitle}>
-                        {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
-                    </Text>
-                </View>
-            </View>
-
-            <FlatList
-                data={conversations}
-                keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
-                renderItem={renderConversation}
-                refreshControl={
-                    <RefreshControl 
-                        refreshing={refreshing} 
-                        onRefresh={onRefresh}
-                        colors={['#7c3aed']}
-                        tintColor="#7c3aed"
-                    />
-                }
-                contentContainerStyle={[
-                    styles.listContainer,
-                    conversations.length === 0 && styles.emptyContainer
-                ]}
-                ListEmptyComponent={
-                    <View style={styles.empty}>
-                        <Icon name="chatbubbles-outline" size={80} color="#cbd5e1" />
-                        <Text style={styles.emptyTitle}>No messages yet</Text>
-                        <Text style={styles.emptySubtext}>
-                            Start a conversation by tapping the + button
-                        </Text>
-                    </View>
-                }
-            />
-            
-            <TouchableOpacity
-                style={styles.fab}
-                onPress={() => setShowNewChat(true)}
-                activeOpacity={0.9}
-            >
+        <>
+            <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+            <View style={[styles.container, { backgroundColor: isDark ? '#141414' : '#f8fafc' }]}>
+                {/* Header with Gradient */}
                 <LinearGradient
-                    colors={['#7c3aed', '#a855f7']}
-                    style={styles.fabGradient}
+                    colors={isDark ? ['#1a1a1a', '#141414'] : ['#ffffff', '#f8fafc']}
+                    style={styles.header}
                 >
-                    <Icon name="add" size={28} color="#fff" />
-                </LinearGradient>
-            </TouchableOpacity>
-
-            {/* New Chat Modal */}
-            <Modal 
-                visible={showNewChat} 
-                animationType="slide" 
-                transparent
-                onRequestClose={() => setShowNewChat(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>New Message</Text>
-                            <TouchableOpacity onPress={() => setShowNewChat(false)}>
-                                <Icon name="close" size={24} color="#7c3aed" />
-                            </TouchableOpacity>
+                    <View style={styles.headerContent}>
+                        <TouchableOpacity
+                            style={styles.backButton}
+                            onPress={() => navigation.goBack()}
+                        >
+                            <Feather name="arrow-left" size={22} color="#e50914" />
+                        </TouchableOpacity>
+                        
+                        <View style={styles.headerTitleContainer}>
+                            <Text style={[styles.headerTitle, { color: isDark ? '#ffffff' : '#1a1a1a' }]}>Messages</Text>
+                            <Text style={[styles.headerSubtitle, { color: isDark ? '#b3b3b3' : '#666666' }]}>
+                                {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
+                            </Text>
                         </View>
                         
-                        <View style={styles.modalBody}>
-                            <View style={styles.searchContainer}>
-                                <Icon name="search-outline" size={20} color="#94a3b8" />
-                                <TextInput
-                                    style={styles.searchInput}
-                                    placeholder="Search users..."
-                                    placeholderTextColor="#94a3b8"
-                                    value={searchQuery}
-                                    onChangeText={setSearchQuery}
-                                />
-                                {searchQuery.length > 0 && (
-                                    <TouchableOpacity onPress={() => setSearchQuery('')}>
-                                        <Icon name="close-circle" size={20} color="#94a3b8" />
-                                    </TouchableOpacity>
-                                )}
-                            </View>
+                       
+                    </View>
+                </LinearGradient>
+
+                <FlatList
+                    data={conversations}
+                    keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
+                    renderItem={renderConversation}
+                    refreshControl={
+                        <RefreshControl 
+                            refreshing={refreshing} 
+                            onRefresh={onRefresh}
+                            colors={['#e50914']}
+                            tintColor="#e50914"
+                        />
+                    }
+                    contentContainerStyle={[
+                        styles.listContainer,
+                        conversations.length === 0 && styles.emptyContainer
+                    ]}
+                    ListEmptyComponent={
+                        <View style={styles.empty}>
+                            <Feather name="message-circle" size={64} color={isDark ? '#333333' : '#cbd5e1'} />
+                            <Text style={[styles.emptyTitle, { color: isDark ? '#ffffff' : '#1a1a1a' }]}>No messages yet</Text>
+                            <Text style={[styles.emptySubtext, { color: isDark ? '#b3b3b3' : '#64748b' }]}>
+                                Start a conversation by tapping the + button
+                            </Text>
+                        </View>
+                    }
+                />
+                
+                {/* Floating Action Button */}
+                <TouchableOpacity
+                    style={styles.fab}
+                    onPress={() => { setShowNewChat(true); loadUsers(); }}
+                    activeOpacity={0.9}
+                >
+                    <LinearGradient colors={['#e50914', '#b20710']} style={styles.fabGradient}>
+                        <Feather name="plus" size={24} color="#fff" />
+                    </LinearGradient>
+                </TouchableOpacity>
+
+                {/* New Chat Modal */}
+                <Modal 
+                    visible={showNewChat} 
+                    animationType="slide" 
+                    transparent
+                    onRequestClose={() => setShowNewChat(false)}
+                >
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.modalContent, { backgroundColor: isDark ? '#1a1a1a' : '#ffffff' }]}>
+                            <LinearGradient colors={['#e50914', '#b20710']} style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>New Message</Text>
+                                <TouchableOpacity onPress={() => setShowNewChat(false)}>
+                                    <Feather name="x" size={24} color="#fff" />
+                                </TouchableOpacity>
+                            </LinearGradient>
                             
-                            <FlatList
-                                data={filteredUsers}
-                                keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
-                                renderItem={({ item }) => (
-                                    <TouchableOpacity
-                                        style={styles.userItem}
-                                        onPress={() => startConversation(item.id)}
-                                        activeOpacity={0.7}
-                                    >
-                                        {getImageUrl(item.profile_photo) ? (
-                                            <Image 
-                                                source={{ uri: getImageUrl(item.profile_photo) }} 
-                                                style={styles.userAvatar}
-                                            />
-                                        ) : (
-                                            <View style={styles.userAvatarPlaceholder}>
-                                                <Text style={styles.userAvatarText}>
-                                                    {item.name?.charAt(0).toUpperCase() || '?'}
-                                                </Text>
+                            <View style={styles.modalBody}>
+                                <View style={[styles.searchContainer, { 
+                                    backgroundColor: isDark ? '#2a2a2a' : '#f1f5f9',
+                                    borderColor: isDark ? '#333333' : '#e0e0e0'
+                                }]}>
+                                    <Feather name="search" size={20} color={isDark ? '#666666' : '#94a3b8'} />
+                                    <TextInput
+                                        style={[styles.searchInput, { color: isDark ? '#ffffff' : '#0f172a' }]}
+                                        placeholder="Search users..."
+                                        placeholderTextColor={isDark ? '#666666' : '#94a3b8'}
+                                        value={searchQuery}
+                                        onChangeText={setSearchQuery}
+                                    />
+                                    {searchQuery.length > 0 && (
+                                        <TouchableOpacity onPress={() => setSearchQuery('')}>
+                                            <Feather name="x-circle" size={20} color={isDark ? '#666666' : '#94a3b8'} />
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                                
+                                <FlatList
+                                    data={filteredUsers}
+                                    keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
+                                    renderItem={({ item }) => (
+                                        <TouchableOpacity
+                                            style={[styles.userItem, { borderBottomColor: isDark ? '#333333' : '#f1f5f9' }]}
+                                            onPress={() => startConversation(item.id)}
+                                            activeOpacity={0.7}
+                                        >
+                                            {getImageUrl(item.profile_photo) ? (
+                                                <Image 
+                                                    source={{ uri: getImageUrl(item.profile_photo) }} 
+                                                    style={styles.userAvatar}
+                                                />
+                                            ) : (
+                                                <View style={[styles.userAvatarPlaceholder, { backgroundColor: '#e50914' }]}>
+                                                    <Text style={styles.userAvatarText}>
+                                                        {item.name?.charAt(0).toUpperCase() || '?'}
+                                                    </Text>
+                                                </View>
+                                            )}
+                                            <View style={styles.userInfo}>
+                                                <Text style={[styles.userName, { color: isDark ? '#ffffff' : '#1e1b2f' }]}>{item.name}</Text>
+                                                <Text style={[styles.userEmail, { color: isDark ? '#b3b3b3' : '#94a3b8' }]}>{item.email}</Text>
                                             </View>
-                                        )}
-                                        <View style={styles.userInfo}>
-                                            <Text style={styles.userName}>{item.name}</Text>
-                                            <Text style={styles.userEmail}>{item.email}</Text>
+                                            <Feather name="chevron-right" size={20} color={isDark ? '#666666' : '#cbd5e1'} />
+                                        </TouchableOpacity>
+                                    )}
+                                    ListEmptyComponent={
+                                        <View style={styles.noUsersContainer}>
+                                            <Feather name="users" size={48} color={isDark ? '#333333' : '#cbd5e1'} />
+                                            <Text style={[styles.noUsersText, { color: isDark ? '#b3b3b3' : '#94a3b8' }]}>
+                                                {searchQuery ? 'No users found' : 'No other users available'}
+                                            </Text>
                                         </View>
-                                        <Icon name="chevron-forward" size={20} color="#cbd5e1" />
-                                    </TouchableOpacity>
-                                )}
-                                ListEmptyComponent={
-                                    <View style={styles.noUsersContainer}>
-                                        <Icon name="people-outline" size={48} color="#cbd5e1" />
-                                        <Text style={styles.noUsersText}>
-                                            {searchQuery ? 'No users found' : 'No other users available'}
-                                        </Text>
-                                    </View>
-                                }
-                                showsVerticalScrollIndicator={false}
-                            />
+                                    }
+                                    showsVerticalScrollIndicator={false}
+                                />
+                            </View>
                         </View>
                     </View>
-                </View>
-            </Modal>
-        </View>
+                </Modal>
+            </View>
+        </>
     );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (isDark) => StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f8fafc',
     },
     center: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#f8fafc',
     },
     loadingText: {
         marginTop: 12,
         fontSize: 14,
-        color: '#64748b',
     },
     header: {
-        paddingTop: 50,
+        paddingTop: Platform.OS === 'ios' ? 56 : 44,
         paddingBottom: 20,
-        borderBottomLeftRadius: 30,
-        borderBottomRightRadius: 30,
-        backgroundColor: '#fff',
-        borderBottomWidth: 1,
-        borderBottomColor: '#edeef5',
-    },
-    headerContent: {
         paddingHorizontal: 20,
     },
+    headerContent: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    backButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: isDark ? 'rgba(229,9,20,0.15)' : '#f3e8ff',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerTitleContainer: {
+        alignItems: 'center',
+    },
     headerTitle: {
-        fontSize: 28,
-        fontWeight: '800',
-        color: '#1e1b2f',
-        letterSpacing: -0.5,
-        marginBottom: 4,
+        fontSize: 20,
+        fontWeight: '600',
     },
     headerSubtitle: {
-        fontSize: 14,
-        color: '#5b5b7a',
+        fontSize: 12,
+        marginTop: 2,
+    },
+    themeToggle: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: isDark ? 'rgba(229,9,20,0.15)' : '#f3e8ff',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     listContainer: {
         padding: 16,
@@ -428,17 +460,15 @@ const styles = StyleSheet.create({
     },
     conversationCard: {
         flexDirection: 'row',
-        backgroundColor: '#ffffff',
         padding: 16,
         marginBottom: 12,
-        borderRadius: 20,
+        borderRadius: 16,
+        borderWidth: 1,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.05,
         shadowRadius: 8,
         elevation: 3,
-        borderWidth: 1,
-        borderColor: '#edeef5',
     },
     avatarContainer: {
         position: 'relative',
@@ -447,11 +477,17 @@ const styles = StyleSheet.create({
         width: 52,
         height: 52,
         borderRadius: 26,
+        borderWidth: 2,
+        borderColor: '#e50914',
     },
     avatarPlaceholder: {
-        backgroundColor: '#7c3aed',
+        width: 52,
+        height: 52,
+        borderRadius: 26,
         justifyContent: 'center',
         alignItems: 'center',
+        borderWidth: 2,
+        borderColor: '#e50914',
     },
     avatarText: {
         fontSize: 20,
@@ -467,7 +503,7 @@ const styles = StyleSheet.create({
         borderRadius: 6,
         backgroundColor: '#10b981',
         borderWidth: 2,
-        borderColor: '#fff',
+        borderColor: isDark ? '#1a1a1a' : '#fff',
     },
     conversationInfo: {
         flex: 1,
@@ -482,12 +518,10 @@ const styles = StyleSheet.create({
     userName: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#1e1b2f',
         flex: 1,
     },
     timeText: {
         fontSize: 11,
-        color: '#94a3b8',
         marginLeft: 8,
     },
     messagePreview: {
@@ -498,10 +532,9 @@ const styles = StyleSheet.create({
     lastMessage: {
         flex: 1,
         fontSize: 13,
-        color: '#5b5b7a',
     },
     unreadBadge: {
-        backgroundColor: '#7c3aed',
+        backgroundColor: '#e50914',
         borderRadius: 12,
         minWidth: 22,
         height: 22,
@@ -519,16 +552,19 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: 24,
         right: 24,
-        shadowColor: '#7c3aed',
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        shadowColor: '#e50914',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
         shadowRadius: 8,
         elevation: 6,
+        overflow: 'hidden',
     },
     fabGradient: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+        width: '100%',
+        height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -540,24 +576,21 @@ const styles = StyleSheet.create({
         marginTop: 20,
         fontSize: 20,
         fontWeight: '700',
-        color: '#0f172a',
     },
     emptySubtext: {
         marginTop: 8,
         fontSize: 14,
-        color: '#64748b',
         textAlign: 'center',
         paddingHorizontal: 32,
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: 'rgba(0,0,0,0.6)',
         justifyContent: 'flex-end',
     },
     modalContent: {
-        backgroundColor: '#fff',
-        borderTopLeftRadius: 30,
-        borderTopRightRadius: 30,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
         maxHeight: '80%',
         overflow: 'hidden',
     },
@@ -567,13 +600,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 20,
         paddingVertical: 20,
-        borderBottomWidth: 1,
-        borderBottomColor: '#edeef5',
     },
     modalTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#1e1b2f',
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#fff',
     },
     modalBody: {
         padding: 20,
@@ -581,37 +612,38 @@ const styles = StyleSheet.create({
     searchContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#f1f5f9',
-        borderRadius: 12,
+        borderRadius: 10,
         paddingHorizontal: 16,
         paddingVertical: 12,
         marginBottom: 20,
         gap: 10,
+        borderWidth: 1,
     },
     searchInput: {
         flex: 1,
         fontSize: 15,
-        color: '#0f172a',
     },
     userItem: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: 12,
         borderBottomWidth: 1,
-        borderBottomColor: '#f1f5f9',
     },
     userAvatar: {
         width: 48,
         height: 48,
         borderRadius: 24,
+        borderWidth: 2,
+        borderColor: '#e50914',
     },
     userAvatarPlaceholder: {
         width: 48,
         height: 48,
         borderRadius: 24,
-        backgroundColor: '#7c3aed',
         justifyContent: 'center',
         alignItems: 'center',
+        borderWidth: 2,
+        borderColor: '#e50914',
     },
     userAvatarText: {
         fontSize: 18,
@@ -624,7 +656,6 @@ const styles = StyleSheet.create({
     },
     userEmail: {
         fontSize: 12,
-        color: '#94a3b8',
         marginTop: 2,
     },
     noUsersContainer: {
@@ -634,7 +665,6 @@ const styles = StyleSheet.create({
     noUsersText: {
         marginTop: 12,
         fontSize: 14,
-        color: '#94a3b8',
         textAlign: 'center',
     },
-}); 
+});

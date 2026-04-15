@@ -1,29 +1,33 @@
 // src/screens/main/DashboardScreen.js
-import Icon from '@expo/vector-icons/Ionicons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
-  Appearance,
-  Dimensions,
+  Platform,
   RefreshControl,
+  ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  useWindowDimensions
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '../../api/client';
 import { matchesAPI } from '../../api/matches';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import { useAuth } from '../../context/AuthContext';
-
-const { width } = Dimensions.get('window');
+import { useTheme } from '../../context/ThemeContext';
 
 export default function DashboardScreen({ navigation }) {
   const { user, isAdmin, logout } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
+  const { width } = useWindowDimensions();
+
   const [stats, setStats] = useState(null);
   const [recentLost, setRecentLost] = useState([]);
   const [recentFound, setRecentFound] = useState([]);
@@ -33,845 +37,967 @@ export default function DashboardScreen({ navigation }) {
   const [pendingFound, setPendingFound] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  
-  const scrollY = useRef(new Animated.Value(0)).current;
+
   const pollRef = useRef(null);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
+
+  const isTablet = width >= 768;
+  const isDesktop = width >= 1024;
+  const ph = isDesktop ? 40 : isTablet ? 24 : 20;
 
   useEffect(() => {
-    loadThemePreference();
     startPolling();
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
-  const loadThemePreference = async () => {
-    try {
-      const savedTheme = await AsyncStorage.getItem('foundify-theme');
-      if (savedTheme === 'dark') {
-        setIsDarkMode(true);
-      } else {
-        const colorScheme = Appearance?.getColorScheme?.() || 'light';
-        setIsDarkMode(colorScheme === 'dark');
-      }
-    } catch (error) {
-      console.log('Error loading theme:', error);
-    }
+  const animateIn = () => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 420, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 380, useNativeDriver: true }),
+    ]).start();
   };
 
   const startPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
-      try {
-        await api.get('/notifications');
-      } catch (err) {
-        // Silently swallow
-      }
+      try { await api.get('/notifications'); } catch {}
     }, 15000);
   };
 
   const loadData = async () => {
     try {
       setLoading(true);
-      
-      const statsRes = await api.get('/dashboard/stats');
+      const [statsRes, recentRes, matchStatsRes] = await Promise.all([
+        api.get('/dashboard/stats'),
+        api.get('/dashboard/recent-items'),
+        matchesAPI.getMatchStats(),
+      ]);
+
       const statsData = statsRes.data;
-      
-      const recentRes = await api.get('/dashboard/recent-items');
       const recentData = recentRes.data;
-      
-      const matchStatsRes = await matchesAPI.getMatchStats();
       const matchStatsData = matchStatsRes.data?.stats || matchStatsRes.data || {};
-      
+
       if (isAdmin) {
         try {
-          const pendingLostRes = await api.get('/lost-items', { params: { status: 'pending', per_page: 10 } });
-          setPendingLost(pendingLostRes.data?.data || []);
-          
-          const pendingFoundRes = await api.get('/found-items', { params: { status: 'pending', per_page: 10 } });
-          setPendingFound(pendingFoundRes.data?.data || []);
-          
-          const pendingMatchesRes = await api.get('/matches', { params: { status: 'pending', per_page: 10 } });
-          setPendingMatches(pendingMatchesRes.data?.data || []);
-        } catch (error) {
-          console.error('Error fetching admin data:', error);
-        }
+          const [plRes, pfRes, pmRes] = await Promise.all([
+            api.get('/lost-items', { params: { status: 'pending', per_page: 10 } }),
+            api.get('/found-items', { params: { status: 'pending', per_page: 10 } }),
+            api.get('/matches', { params: { status: 'pending', per_page: 10 } }),
+          ]);
+          setPendingLost(plRes.data?.data || []);
+          setPendingFound(pfRes.data?.data || []);
+          setPendingMatches(pmRes.data?.data || []);
+        } catch (e) { console.error('Admin data error:', e); }
       } else {
         try {
           const myMatchesRes = await matchesAPI.getMyMatches({ per_page: 10 });
           const matches = myMatchesRes.data?.data || [];
-          const highMatchesData = matches.filter(m => parseFloat(m.match_score) >= 60);
-          setHighMatches(highMatchesData);
-        } catch (error) {
-          console.error('Error fetching matches:', error);
-        }
+          setHighMatches(matches.filter(m => parseFloat(m.match_score) >= 60));
+        } catch (e) { console.error('Matches error:', e); }
       }
-      
-      const lost = Array.isArray(recentData) ? recentData.filter((i) => i.type === 'lost') : [];
-      const found = Array.isArray(recentData) ? recentData.filter((i) => i.type === 'found') : [];
-      
+
+      const lost = Array.isArray(recentData) ? recentData.filter(i => i.type === 'lost') : [];
+      const found = Array.isArray(recentData) ? recentData.filter(i => i.type === 'found') : [];
       setRecentLost(lost);
       setRecentFound(found);
-      
+
       setStats({
-        total_users: statsData.total_users ?? 0,
+        total_lost_items: statsData.total_lost_items ?? 0,
+        total_found_items: statsData.total_found_items ?? 0,
+        pending_lost_items: statsData.pending_lost_items ?? 0,
+        pending_found_items: statsData.pending_found_items ?? 0,
         total_matches: statsData.total_matches ?? matchStatsData.total ?? 0,
         confirmed_matches: statsData.confirmed_matches ?? matchStatsData.confirmed ?? 0,
         pending_matches: statsData.pending_matches ?? matchStatsData.pending ?? 0,
         my_lost_items: statsData.my_lost_items ?? 0,
         my_found_items: statsData.my_found_items ?? 0,
-        my_matches: statsData.my_matches ?? matchStatsData.total ?? 0,
         my_lost_recovered: statsData.my_lost_recovered ?? 0,
         my_found_claimed: statsData.my_found_claimed ?? 0,
+        total_users: statsData.total_users ?? 0,
       });
-      
     } catch (error) {
-      console.error('Error loading dashboard:', error);
+      console.error('Dashboard error:', error);
       Alert.alert('Error', 'Failed to load dashboard data');
     } finally {
       setLoading(false);
       setRefreshing(false);
+      animateIn();
     }
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      loadData();
-    }, [])
-  );
-
-  const onRefresh = () => {
-    setRefreshing(true);
+  useFocusEffect(useCallback(() => {
+    fadeAnim.setValue(0);
+    slideAnim.setValue(24);
     loadData();
-  };
+  }, []));
+
+  const onRefresh = () => { setRefreshing(true); loadData(); };
 
   const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', onPress: logout, style: 'destructive' },
-      ]
-    );
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Logout', onPress: logout, style: 'destructive' },
+    ]);
   };
 
-  const headerBackgroundColor = scrollY.interpolate({
-    inputRange: [0, 100],
-    outputRange: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.95)'],
-    extrapolate: 'clamp',
-  });
+  const handleApproveItem = (itemId, itemType = 'lost') => {
+    Alert.alert('Approve Item', 'Approve this item?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Approve', onPress: async () => {
+        try { await api.post(`/admin/${itemType}-items/${itemId}/approve`); loadData(); }
+        catch { Alert.alert('Error', 'Failed to approve item'); }
+      }},
+    ]);
+  };
+
+  const handleRejectItem = (itemId, itemType = 'lost') => {
+    Alert.alert('Reject Item', 'Reject this item?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reject', style: 'destructive', onPress: async () => {
+        try { await api.post(`/admin/${itemType}-items/${itemId}/reject`); loadData(); }
+        catch { Alert.alert('Error', 'Failed to reject item'); }
+      }},
+    ]);
+  };
+
+  const handleApproveMatch = (matchId) => {
+    Alert.alert('Confirm Match', 'Confirm this match?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Confirm', onPress: async () => {
+        try { await api.post(`/matches/${matchId}/confirm`); loadData(); }
+        catch { Alert.alert('Error', 'Failed to confirm match'); }
+      }},
+    ]);
+  };
+
+  const handleRejectMatch = (matchId) => {
+    Alert.alert('Reject Match', 'Reject this match?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reject', style: 'destructive', onPress: async () => {
+        try { await api.post(`/matches/${matchId}/reject`); loadData(); }
+        catch { Alert.alert('Error', 'Failed to reject match'); }
+      }},
+    ]);
+  };
 
   const totalRecovered = (stats?.my_lost_recovered || 0) + (stats?.my_found_claimed || 0);
-  const styles = getStyles(isDarkMode);
 
-  if (loading) {
-    return <LoadingSpinner />;
-  }
+  // ─── Color tokens ────────────────────────────────────────────────────────────
+  const C = {
+    bg:        isDark ? '#0f0f0f' : '#f7f7f5',
+    surface:   isDark ? '#1a1a1a' : '#ffffff',
+    surface2:  isDark ? '#222222' : '#f2f2f0',
+    border:    isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)',
+    text:      isDark ? '#f0f0ee' : '#111110',
+    textMuted: isDark ? '#888884' : '#888884',
+    textFaint: isDark ? '#444440' : '#ccccca',
+    red:       '#e50914',
+    redMuted:  isDark ? 'rgba(229,9,20,0.12)' : 'rgba(229,9,20,0.08)',
+    green:     '#16a34a',
+    greenMuted:isDark ? 'rgba(22,163,74,0.12)' : 'rgba(22,163,74,0.08)',
+    amber:     '#d97706',
+    amberMuted:isDark ? 'rgba(217,119,6,0.12)' : 'rgba(217,119,6,0.08)',
+    blue:      '#2563eb',
+    blueMuted: isDark ? 'rgba(37,99,235,0.12)' : 'rgba(37,99,235,0.08)',
+  };
 
-  // Admin Dashboard View
+  if (loading) return <LoadingSpinner />;
+
+  // ─── Shared components ────────────────────────────────────────────────────────
+
+  const SectionLabel = ({ icon, label, color = C.red, action, onAction }) => (
+    <View style={[styles.sectionLabel, { paddingHorizontal: ph }]}>
+      <View style={styles.sectionLabelLeft}>
+        <View style={[styles.sectionDot, { backgroundColor: color }]} />
+        <Text style={[styles.sectionLabelText, { color: C.textMuted }]}>{label}</Text>
+      </View>
+      {action && (
+        <TouchableOpacity onPress={onAction}>
+          <Text style={[styles.sectionAction, { color: C.red }]}>{action}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  const StatCard = ({ icon, value, label, color, colorMuted, onPress }) => (
+    <TouchableOpacity
+      style={[styles.statCard, { backgroundColor: C.surface, borderColor: C.border }]}
+      onPress={onPress}
+      activeOpacity={0.75}
+    >
+      <View style={[styles.statIconWrap, { backgroundColor: colorMuted }]}>
+        <Feather name={icon} size={16} color={color} />
+      </View>
+      <Text style={[styles.statValue, { color: C.text }]}>{value}</Text>
+      <Text style={[styles.statLabel, { color: C.textMuted }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+
+  const PendingRow = ({ title, subtitle, onView, onApprove, onReject }) => (
+    <View style={[styles.pendingRow, { borderBottomColor: C.border }]}>
+      <View style={styles.pendingRowInfo}>
+        <Text style={[styles.pendingRowTitle, { color: C.text }]} numberOfLines={1}>{title}</Text>
+        {subtitle ? <Text style={[styles.pendingRowSub, { color: C.textMuted }]} numberOfLines={1}>{subtitle}</Text> : null}
+      </View>
+      <View style={styles.pendingRowActions}>
+        <TouchableOpacity style={[styles.rowBtn, { backgroundColor: C.surface2 }]} onPress={onView}>
+          <Feather name="eye" size={13} color={C.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.rowBtn, { backgroundColor: C.greenMuted }]} onPress={onApprove}>
+          <Feather name="check" size={13} color={C.green} />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.rowBtn, { backgroundColor: C.redMuted }]} onPress={onReject}>
+          <Feather name="x" size={13} color={C.red} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const EmptySlate = ({ message }) => (
+    <View style={styles.emptySlate}>
+      <View style={[styles.emptyIcon, { backgroundColor: C.surface2 }]}>
+        <Feather name="inbox" size={18} color={C.textFaint} />
+      </View>
+      <Text style={[styles.emptyText, { color: C.textMuted }]}>{message}</Text>
+    </View>
+  );
+
+  const ListCard = ({ title, accent, items, emptyMsg, renderItem, onViewAll }) => (
+    <View style={[styles.listCard, { backgroundColor: C.surface, borderColor: C.border }]}>
+      <View style={[styles.listCardHeader, { borderBottomColor: C.border }]}>
+        <View style={[styles.listCardAccent, { backgroundColor: accent }]} />
+        <Text style={[styles.listCardTitle, { color: C.text }]}>{title}</Text>
+        {onViewAll && (
+          <TouchableOpacity onPress={onViewAll}>
+            <Text style={[styles.listCardViewAll, { color: C.red }]}>See all</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      {items.length > 0 ? items.map(renderItem) : <EmptySlate message={emptyMsg} />}
+    </View>
+  );
+
+  // ─── Admin Dashboard ──────────────────────────────────────────────────────────
   if (isAdmin) {
     return (
-      <View style={styles.container}>
-        <Animated.ScrollView
-          style={styles.scrollView}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: false }
-          )}
-          scrollEventThrottle={16}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#7c3aed']} tintColor="#7c3aed" />
-          }
+      <SafeAreaView style={[styles.root, { backgroundColor: C.bg }]} edges={['top']}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
+
+        <ScrollView
           showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} colors={[C.red]} />
+          }
         >
-          {/* Animated Header - White Background */}
-          <Animated.View style={[styles.header, { backgroundColor: headerBackgroundColor }]}>
-            <View style={styles.headerContent}>
-              <View style={styles.headerTop}>
-                <View>
-                  <Text style={styles.welcomeText}>Admin Dashboard</Text>
-                  <Text style={styles.subText}>Welcome back, {user?.name}</Text>
-                </View>
-                <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-                  <Icon name="log-out-outline" size={22} color="#7c3aed" />
+          {/* ── Header ── */}
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+            <View style={[styles.header, { paddingHorizontal: ph }]}>
+              <View>
+                <Text style={[styles.headerEyebrow, { color: C.textMuted }]}>Admin</Text>
+                <Text style={[styles.headerTitle, { color: C.text }]}>Dashboard</Text>
+              </View>
+              <View style={styles.headerRight}>
+                <TouchableOpacity style={[styles.iconBtn, { backgroundColor: C.surface, borderColor: C.border }]} onPress={toggleTheme}>
+                  <Feather name={isDark ? 'sun' : 'moon'} size={17} color={C.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.iconBtn, { backgroundColor: C.surface, borderColor: C.border }]} onPress={handleLogout}>
+                  <Feather name="log-out" size={17} color={C.red} />
                 </TouchableOpacity>
               </View>
+            </View>
+
+            {/* ── Greeting strip ── */}
+            <View style={[styles.greetingStrip, { marginHorizontal: ph, backgroundColor: C.surface, borderColor: C.border }]}>
+              <View style={[styles.avatarSmall, { backgroundColor: C.redMuted }]}>
+                <Text style={[styles.avatarInitial, { color: C.red }]}>{user?.name?.charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.greetingName, { color: C.text }]}>{user?.name}</Text>
+                <Text style={[styles.greetingRole, { color: C.textMuted }]}>Administrator</Text>
+              </View>
+              <View style={[styles.onlineDot, { backgroundColor: C.green }]} />
             </View>
           </Animated.View>
 
-          {/* Stats Cards */}
-          <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <View style={styles.statGradient}>
-                <View style={[styles.statIcon, styles.iconPurpleLight]}>
-                  <Icon name="people" size={24} color="#7c3aed" />
-                </View>
-                <Text style={styles.statValue}>{stats?.total_users || 0}</Text>
-                <Text style={styles.statLabel}>Total Users</Text>
-              </View>
+          {/* ── Stat cards ── */}
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+            <SectionLabel icon="bar-chart-2" label="OVERVIEW" />
+            <View style={[styles.statsRow, { paddingHorizontal: ph }]}>
+              <StatCard icon="users" value={stats?.total_users || 0} label="Users" color={C.blue} colorMuted={C.blueMuted} onPress={() => navigation.navigate('AdminUsers')} />
+              <StatCard icon="git-branch" value={stats?.total_matches || 0} label="Matches" color={C.amber} colorMuted={C.amberMuted} onPress={() => navigation.navigate('AdminMatches')} />
+              <StatCard icon="check-circle" value={stats?.confirmed_matches || 0} label="Confirmed" color={C.green} colorMuted={C.greenMuted} onPress={() => navigation.navigate('AdminMatches', { status: 'confirmed' })} />
+              <StatCard icon="clock" value={stats?.pending_matches || 0} label="Pending" color={C.red} colorMuted={C.redMuted} onPress={() => navigation.navigate('AdminMatches', { status: 'pending' })} />
+            </View>
+          </Animated.View>
+
+          {/* ── Pending approvals ── */}
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+            <SectionLabel label="PENDING APPROVALS" />
+
+            {/* Lost items */}
+            <View style={{ paddingHorizontal: ph, marginBottom: 12 }}>
+              <ListCard
+                title={`Lost Items  ·  ${pendingLost.length}`}
+                accent={C.red}
+                items={pendingLost.slice(0, isTablet ? 5 : 3)}
+                emptyMsg="No pending lost items"
+                onViewAll={() => navigation.navigate('Lost', { status: 'pending' })}
+                renderItem={(item) => (
+                  <PendingRow
+                    key={`lost-${item.id}`}
+                    title={item.item_name}
+                    subtitle={item.user?.name}
+                    onView={() => navigation.navigate('ItemDetail', { type: 'lost', id: item.id })}
+                    onApprove={() => handleApproveItem(item.id, 'lost')}
+                    onReject={() => handleRejectItem(item.id, 'lost')}
+                  />
+                )}
+              />
             </View>
 
-            <View style={styles.statCard}>
-              <View style={styles.statGradient}>
-                <View style={[styles.statIcon, styles.iconGreenLight]}>
-                  <Icon name="git-compare" size={24} color="#10b981" />
-                </View>
-                <Text style={styles.statValue}>{stats?.total_matches || 0}</Text>
-                <Text style={styles.statLabel}>Total Matches</Text>
-              </View>
+            {/* Found items */}
+            <View style={{ paddingHorizontal: ph, marginBottom: 12 }}>
+              <ListCard
+                title={`Found Items  ·  ${pendingFound.length}`}
+                accent={C.green}
+                items={pendingFound.slice(0, isTablet ? 5 : 3)}
+                emptyMsg="No pending found items"
+                onViewAll={() => navigation.navigate('Found', { status: 'pending' })}
+                renderItem={(item) => (
+                  <PendingRow
+                    key={`found-${item.id}`}
+                    title={item.item_name}
+                    subtitle={item.user?.name}
+                    onView={() => navigation.navigate('ItemDetail', { type: 'found', id: item.id })}
+                    onApprove={() => handleApproveItem(item.id, 'found')}
+                    onReject={() => handleRejectItem(item.id, 'found')}
+                  />
+                )}
+              />
             </View>
 
-            <View style={styles.statCard}>
-              <View style={styles.statGradient}>
-                <View style={[styles.statIcon, styles.iconTealLight]}>
-                  <Icon name="checkmark-done" size={24} color="#10b981" />
-                </View>
-                <Text style={styles.statValue}>{stats?.confirmed_matches || 0}</Text>
-                <Text style={styles.statLabel}>Successful</Text>
-              </View>
+            {/* Matches */}
+            <View style={{ paddingHorizontal: ph, marginBottom: 12 }}>
+              <ListCard
+                title={`Matches  ·  ${pendingMatches.length}`}
+                accent={C.amber}
+                items={pendingMatches.slice(0, isTablet ? 5 : 3)}
+                emptyMsg="No pending matches"
+                onViewAll={() => navigation.navigate('AdminMatches', { status: 'pending' })}
+                renderItem={(match) => (
+                  <PendingRow
+                    key={`match-${match.id}`}
+                    title={`${match.lost_item?.item_name || '—'}  ↔  ${match.found_item?.item_name || '—'}`}
+                    subtitle={`${parseFloat(match.match_score).toFixed(0)}% match score`}
+                    onView={() => navigation.navigate('MatchDetail', { id: match.id })}
+                    onApprove={() => handleApproveMatch(match.id)}
+                    onReject={() => handleRejectMatch(match.id)}
+                  />
+                )}
+              />
             </View>
+          </Animated.View>
 
-            <View style={styles.statCard}>
-              <View style={styles.statGradient}>
-                <View style={[styles.statIcon, styles.iconAmberLight]}>
-                  <Icon name="time" size={24} color="#f59e0b" />
-                </View>
-                <Text style={styles.statValue}>{stats?.pending_matches || 0}</Text>
-                <Text style={styles.statLabel}>Pending</Text>
-              </View>
+          {/* ── Quick actions ── */}
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+            <SectionLabel label="QUICK ACTIONS" />
+            <View style={[styles.actionsRow, { paddingHorizontal: ph }]}>
+              {[
+                { icon: 'map', label: 'Map', color: C.blue, colorMuted: C.blueMuted, screen: 'Map' },
+                { icon: 'git-branch', label: 'Matches', color: C.amber, colorMuted: C.amberMuted, screen: 'AdminMatches' },
+                { icon: 'users', label: 'Users', color: C.red, colorMuted: C.redMuted, screen: 'AdminUsers' },
+              ].map(a => (
+                <TouchableOpacity
+                  key={a.screen}
+                  style={[styles.actionChip, { backgroundColor: C.surface, borderColor: C.border }]}
+                  onPress={() => navigation.navigate(a.screen)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[styles.actionChipIcon, { backgroundColor: a.colorMuted }]}>
+                    <Feather name={a.icon} size={16} color={a.color} />
+                  </View>
+                  <Text style={[styles.actionChipLabel, { color: C.text }]}>{a.label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-          </View>
+          </Animated.View>
+        </ScrollView>
 
-          {/* Pending Items */}
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionTitleLeft}>
-                <Icon name="search" size={20} color="#7c3aed" />
-                <Text style={styles.sectionTitle}>Pending Lost Items</Text>
-              </View>
-              <TouchableOpacity onPress={() => navigation.navigate('Lost', { status: 'pending' })}>
-                <Text style={styles.viewAllText}>View All →</Text>
-              </TouchableOpacity>
-            </View>
-            {pendingLost.length > 0 ? pendingLost.slice(0, 3).map((item) => (
-              <View key={`lost-${item.id}`} style={styles.listItem}>
-                <View style={styles.listItemContent}>
-                  <Text style={styles.listItemTitle}>{item.item_name}</Text>
-                  <Text style={styles.listItemSubtitle}>{item.user?.name || 'Unknown'}</Text>
-                </View>
-                <View style={styles.actionButtons}>
-                  <TouchableOpacity style={[styles.actionBtn, styles.approveBtn]} onPress={() => handleApproveItem(item.id, 'lost')}>
-                    <Icon name="checkmark" size={16} color="#fff" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]} onPress={() => handleRejectItem(item.id, 'lost')}>
-                    <Icon name="close" size={16} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )) : (
-              <View style={styles.emptyState}>
-                <Icon name="checkmark-circle-outline" size={48} color="#cbd5e1" />
-                <Text style={styles.emptyStateText}>No pending lost items</Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionTitleLeft}>
-                <Icon name="checkmark-circle" size={20} color="#7c3aed" />
-                <Text style={styles.sectionTitle}>Pending Found Items</Text>
-              </View>
-              <TouchableOpacity onPress={() => navigation.navigate('Found', { status: 'pending' })}>
-                <Text style={styles.viewAllText}>View All →</Text>
-              </TouchableOpacity>
-            </View>
-            {pendingFound.length > 0 ? pendingFound.slice(0, 3).map((item) => (
-              <View key={`found-${item.id}`} style={styles.listItem}>
-                <View style={styles.listItemContent}>
-                  <Text style={styles.listItemTitle}>{item.item_name}</Text>
-                  <Text style={styles.listItemSubtitle}>{item.user?.name || 'Unknown'}</Text>
-                </View>
-                <View style={styles.actionButtons}>
-                  <TouchableOpacity style={[styles.actionBtn, styles.approveBtn]} onPress={() => handleApproveItem(item.id, 'found')}>
-                    <Icon name="checkmark" size={16} color="#fff" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]} onPress={() => handleRejectItem(item.id, 'found')}>
-                    <Icon name="close" size={16} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )) : (
-              <View style={styles.emptyState}>
-                <Icon name="checkmark-circle-outline" size={48} color="#cbd5e1" />
-                <Text style={styles.emptyStateText}>No pending found items</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Quick Actions */}
-          <View style={styles.quickActions}>
-            <Text style={styles.quickActionsTitle}>
-              <Icon name="flash" size={16} color="#7c3aed" /> Quick Actions
-            </Text>
-            <View style={styles.actionsGrid}>
-              <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('AdminUsers')}>
-                <View style={styles.actionGradient}>
-                  <Icon name="people" size={32} color="#7c3aed" />
-                  <Text style={styles.actionText}>Manage Users</Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('Map')}>
-                <View style={styles.actionGradient}>
-                  <Icon name="map" size={32} color="#a855f7" />
-                  <Text style={styles.actionText}>View Map</Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('Matches')}>
-                <View style={styles.actionGradient}>
-                  <Icon name="git-compare" size={32} color="#f59e0b" />
-                  <Text style={styles.actionText}>All Matches</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Animated.ScrollView>
-
-        {/* Floating Action Button */}
-        <Animated.View style={styles.floatingButton}>
-          <TouchableOpacity onPress={() => navigation.navigate('CreateItem', { type: 'lost' })} activeOpacity={0.9}>
-            <LinearGradient colors={['#7c3aed', '#a855f7']} style={styles.floatingButtonGradient}>
-              <Icon name="add" size={28} color="#fff" />
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-      </View>
+        {/* FAB */}
+        <TouchableOpacity style={styles.fab} onPress={() => navigation.navigate('CreateItem', { type: 'lost' })} activeOpacity={0.85}>
+          <LinearGradient colors={['#e50914', '#b20710']} style={styles.fabInner}>
+            <Feather name="plus" size={22} color="#fff" />
+          </LinearGradient>
+        </TouchableOpacity>
+      </SafeAreaView>
     );
   }
 
-  // Regular User Dashboard View
+  // ─── User Dashboard ───────────────────────────────────────────────────────────
   return (
-    <View style={styles.container}>
-      <Animated.ScrollView
-        style={styles.scrollView}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
-        )}
-        scrollEventThrottle={16}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#7c3aed']} tintColor="#7c3aed" />
-        }
+    <SafeAreaView style={[styles.root, { backgroundColor: C.bg }]} edges={['top']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
+
+      <ScrollView
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.red} colors={[C.red]} />
+        }
       >
-        {/* Animated Header - White Background */}
-        <Animated.View style={[styles.header, { backgroundColor: headerBackgroundColor }]}>
-          <View style={styles.headerContent}>
-            <View style={styles.headerTop}>
-              <View>
-                <Text style={styles.welcomeText}>Dashboard</Text>
-                <Text style={styles.subText}>Welcome back, {user?.name}</Text>
-              </View>
-              <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-                <Icon name="log-out-outline" size={22} color="#7c3aed" />
+        {/* ── Header ── */}
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+          <View style={[styles.header, { paddingHorizontal: ph }]}>
+            <View>
+              <Text style={[styles.headerEyebrow, { color: C.textMuted }]}>Welcome back</Text>
+              <Text style={[styles.headerTitle, { color: C.text }]}>{user?.name?.split(' ')[0]}</Text>
+            </View>
+            <View style={styles.headerRight}>
+              <TouchableOpacity style={[styles.iconBtn, { backgroundColor: C.surface, borderColor: C.border }]} onPress={toggleTheme}>
+                <Feather name={isDark ? 'sun' : 'moon'} size={17} color={C.textMuted} />
               </TouchableOpacity>
+              <TouchableOpacity style={[styles.iconBtn, { backgroundColor: C.surface, borderColor: C.border }]} onPress={handleLogout}>
+                <Feather name="log-out" size={17} color={C.red} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+         
+        </Animated.View>
+
+        {/* ── Stats cards ── */}
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+          <SectionLabel label="MY STATS" />
+          <View style={[styles.statsRow, { paddingHorizontal: ph }]}>
+            <StatCard icon="alert-circle" value={stats?.my_lost_items || 0} label="Lost" color={C.red} colorMuted={C.redMuted} onPress={() => navigation.navigate('Lost')} />
+            <StatCard icon="check-circle" value={stats?.my_found_items || 0} label="Found" color={C.green} colorMuted={C.greenMuted} onPress={() => navigation.navigate('Found')} />
+            <StatCard icon="git-branch" value={highMatches.length} label="Matches" color={C.blue} colorMuted={C.blueMuted} onPress={() => navigation.navigate('Matches')} />
+            <StatCard icon="award" value={totalRecovered} label="Recovered" color={C.amber} colorMuted={C.amberMuted} onPress={() => navigation.navigate('Matches', { status: 'confirmed' })} />
+          </View>
+        </Animated.View>
+
+        {/* ── Potential matches ── */}
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+          <SectionLabel label="POTENTIAL MATCHES" action="See all" onAction={() => navigation.navigate('Matches')} />
+          <View style={{ paddingHorizontal: ph, marginBottom: 12 }}>
+            <ListCard
+              title="High confidence matches"
+              accent={C.blue}
+              items={highMatches.slice(0, isTablet ? 5 : 3)}
+              emptyMsg="No matches yet — keep reporting items!"
+              renderItem={(match) => (
+                <TouchableOpacity
+                  key={match.id}
+                  style={[styles.matchRow, { borderBottomColor: C.border }]}
+                  onPress={() => navigation.navigate('MatchDetail', { id: match.id })}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.matchRowLeft}>
+                    <Text style={[styles.matchRowTitle, { color: C.text }]} numberOfLines={1}>
+                      {match.lost_item?.user_id === user?.id ? match.lost_item?.item_name : match.found_item?.item_name}
+                    </Text>
+                    <Text style={[styles.matchRowSub, { color: C.textMuted }]} numberOfLines={1}>
+                      {match.lost_item?.user_id === user?.id ? match.found_item?.item_name : match.lost_item?.item_name}
+                    </Text>
+                  </View>
+                  <View style={styles.matchRowRight}>
+                    <View style={[
+                      styles.scorePill,
+                      { backgroundColor: parseFloat(match.match_score) >= 80 ? C.greenMuted : C.amberMuted }
+                    ]}>
+                      <Text style={[
+                        styles.scorePillText,
+                        { color: parseFloat(match.match_score) >= 80 ? C.green : C.amber }
+                      ]}>
+                        {parseFloat(match.match_score).toFixed(0)}%
+                      </Text>
+                    </View>
+                    <Feather name="chevron-right" size={15} color={C.textFaint} />
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </Animated.View>
+
+        {/* ── Recent items ── */}
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+          <SectionLabel label="RECENT ACTIVITY" />
+          <View style={[styles.recentGrid, { paddingHorizontal: ph, flexDirection: isTablet ? 'row' : 'column', gap: 12 }]}>
+            {/* Lost */}
+            <View style={{ flex: 1 }}>
+              <ListCard
+                title="Lost"
+                accent={C.red}
+                items={recentLost.slice(0, 3)}
+                emptyMsg="Nothing reported yet"
+                onViewAll={() => navigation.navigate('Lost')}
+                renderItem={(item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.recentRow, { borderBottomColor: C.border }]}
+                    onPress={() => navigation.navigate('ItemDetail', { type: 'lost', id: item.id })}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.recentDot, { backgroundColor: C.redMuted }]}>
+                      <Feather name="search" size={11} color={C.red} />
+                    </View>
+                    <View style={styles.recentRowInfo}>
+                      <Text style={[styles.recentRowName, { color: C.text }]} numberOfLines={1}>{item.item_name}</Text>
+                      <Text style={[styles.recentRowDate, { color: C.textMuted }]}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                    </View>
+                    <StatusPill status={item.status} C={C} />
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+            {/* Found */}
+            <View style={{ flex: 1 }}>
+              <ListCard
+                title="Found"
+                accent={C.green}
+                items={recentFound.slice(0, 3)}
+                emptyMsg="Nothing reported yet"
+                onViewAll={() => navigation.navigate('Found')}
+                renderItem={(item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.recentRow, { borderBottomColor: C.border }]}
+                    onPress={() => navigation.navigate('ItemDetail', { type: 'found', id: item.id })}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.recentDot, { backgroundColor: C.greenMuted }]}>
+                      <Feather name="check" size={11} color={C.green} />
+                    </View>
+                    <View style={styles.recentRowInfo}>
+                      <Text style={[styles.recentRowName, { color: C.text }]} numberOfLines={1}>{item.item_name}</Text>
+                      <Text style={[styles.recentRowDate, { color: C.textMuted }]}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                    </View>
+                    <StatusPill status={item.status} C={C} />
+                  </TouchableOpacity>
+                )}
+              />
             </View>
           </View>
         </Animated.View>
 
-        {/* Stats Cards */}
-        <View style={styles.statsGrid}>
-          <TouchableOpacity style={styles.statCard} onPress={() => navigation.navigate('Lost')}>
-            <View style={styles.statGradient}>
-              <View style={[styles.statIcon, styles.iconPurpleLight]}>
-                <Icon name="search" size={24} color="#7c3aed" />
-              </View>
-              <Text style={styles.statValue}>{stats?.my_lost_items || 0}</Text>
-              <Text style={styles.statLabel}>Lost Items</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.statCard} onPress={() => navigation.navigate('Found')}>
-            <View style={styles.statGradient}>
-              <View style={[styles.statIcon, styles.iconGreenLight]}>
-                <Icon name="checkmark-circle" size={24} color="#10b981" />
-              </View>
-              <Text style={styles.statValue}>{stats?.my_found_items || 0}</Text>
-              <Text style={styles.statLabel}>Found Items</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.statCard} onPress={() => navigation.navigate('Matches')}>
-            <View style={styles.statGradient}>
-              <View style={[styles.statIcon, styles.iconPurpleLight]}>
-                <Icon name="git-compare" size={24} color="#7c3aed" />
-              </View>
-              <Text style={styles.statValue}>{stats?.my_matches || 0}</Text>
-              <Text style={styles.statLabel}>Potential Matches</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.statCard} onPress={() => navigation.navigate('Matches', { status: 'confirmed' })}>
-            <View style={styles.statGradient}>
-              <View style={[styles.statIcon, styles.iconAmberLight]}>
-                <Icon name="trophy" size={24} color="#f59e0b" />
-              </View>
-              <Text style={styles.statValue}>{totalRecovered}</Text>
-              <Text style={styles.statLabel}>Recovered</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* Potential Matches */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleLeft}>
-              <Icon name="git-compare" size={20} color="#7c3aed" />
-              <Text style={styles.sectionTitle}>Potential Matches</Text>
-            </View>
-            <TouchableOpacity onPress={() => navigation.navigate('Matches')}>
-              <Text style={styles.viewAllText}>View All →</Text>
-            </TouchableOpacity>
-          </View>
-          {highMatches.length > 0 ? highMatches.slice(0, 3).map((match) => (
-            <TouchableOpacity key={match.id} style={styles.matchRow} onPress={() => navigation.navigate('MatchDetail', { id: match.id })}>
-              <View style={styles.matchInfo}>
-                <Text style={styles.matchItemName}>
-                  {match.lost_item?.user_id === user?.id ? match.lost_item?.item_name : match.found_item?.item_name}
-                </Text>
-                <View style={styles.matchTypeBadge}>
-                  <Text style={styles.matchTypeText}>
-                    {match.lost_item?.user_id === user?.id ? 'LOST' : 'FOUND'}
-                  </Text>
+        {/* ── Quick actions ── */}
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+          <SectionLabel label="QUICK ACTIONS" />
+          <View style={[styles.actionsRow, { paddingHorizontal: ph }]}>
+            {[
+              { icon: 'plus-circle', label: 'Report Lost', color: C.red, colorMuted: C.redMuted, screen: 'CreateItem', params: { type: 'lost' } },
+              { icon: 'check-circle', label: 'Report Found', color: C.green, colorMuted: C.greenMuted, screen: 'CreateItem', params: { type: 'found' } },
+              { icon: 'map', label: 'Map', color: C.blue, colorMuted: C.blueMuted, screen: 'Map', params: {} },
+              { icon: 'git-branch', label: 'Matches', color: C.amber, colorMuted: C.amberMuted, screen: 'Matches', params: {} },
+            ].map(a => (
+              <TouchableOpacity
+                key={a.label}
+                style={[styles.actionChip, { backgroundColor: C.surface, borderColor: C.border }]}
+                onPress={() => navigation.navigate(a.screen, a.params)}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.actionChipIcon, { backgroundColor: a.colorMuted }]}>
+                  <Feather name={a.icon} size={16} color={a.color} />
                 </View>
-              </View>
-              <View style={[styles.matchScore, parseFloat(match.match_score) >= 80 ? styles.scoreHigh : styles.scoreMedium]}>
-                <Text style={styles.scoreText}>{parseFloat(match.match_score).toFixed(0)}%</Text>
-              </View>
-              <Icon name="chevron-forward" size={18} color="#cbd5e1" />
-            </TouchableOpacity>
-          )) : (
-            <View style={styles.emptyState}>
-              <Icon name="git-compare-outline" size={48} color="#cbd5e1" />
-              <Text style={styles.emptyStateText}>No matches yet — keep reporting items!</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Recent Items */}
-        <View style={styles.recentSection}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleLeft}>
-              <Icon name="time-outline" size={20} color="#7c3aed" />
-              <Text style={styles.sectionTitle}>Recent Activity</Text>
-            </View>
+                <Text style={[styles.actionChipLabel, { color: C.text }]}>{a.label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-          
-          <View style={styles.recentGrid}>
-            <View style={styles.recentCard}>
-              <View style={styles.recentHeader}>
-                <Icon name="search" size={16} color="#7c3aed" />
-                <Text style={styles.recentTitle}>Lost Items</Text>
-              </View>
-              {recentLost.slice(0, 2).map((item) => (
-                <TouchableOpacity key={item.id} style={styles.recentItem} onPress={() => navigation.navigate('ItemDetail', { type: 'lost', id: item.id })}>
-                  <Text style={styles.recentItemName}>{item.item_name}</Text>
-                  <Text style={styles.recentItemDate}>
-                    {new Date(item.created_at).toLocaleDateString()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {recentLost.length === 0 && (
-                <Text style={styles.recentEmpty}>No lost items</Text>
-              )}
-            </View>
+        </Animated.View>
+      </ScrollView>
 
-            <View style={styles.recentCard}>
-              <View style={styles.recentHeader}>
-                <Icon name="checkmark-circle" size={16} color="#10b981" />
-                <Text style={styles.recentTitle}>Found Items</Text>
-              </View>
-              {recentFound.slice(0, 2).map((item) => (
-                <TouchableOpacity key={item.id} style={styles.recentItem} onPress={() => navigation.navigate('ItemDetail', { type: 'found', id: item.id })}>
-                  <Text style={styles.recentItemName}>{item.item_name}</Text>
-                  <Text style={styles.recentItemDate}>
-                    {new Date(item.created_at).toLocaleDateString()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {recentFound.length === 0 && (
-                <Text style={styles.recentEmpty}>No found items</Text>
-              )}
-            </View>
-          </View>
-        </View>
+      {/* FAB */}
+      <TouchableOpacity style={styles.fab} onPress={() => navigation.navigate('CreateItem', { type: 'lost' })} activeOpacity={0.85}>
+        <LinearGradient colors={['#e50914', '#b20710']} style={styles.fabInner}>
+          <Feather name="plus" size={22} color="#fff" />
+        </LinearGradient>
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
+}
 
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          <Text style={styles.quickActionsTitle}>
-            <Icon name="flash" size={16} color="#7c3aed" /> Quick Actions
-          </Text>
-          <View style={styles.actionsGrid}>
-            <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('CreateItem', { type: 'lost' })}>
-              <View style={styles.actionGradient}>
-                <Icon name="add-circle" size={32} color="#7c3aed" />
-                <Text style={styles.actionText}>Report Lost</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('CreateItem', { type: 'found' })}>
-              <View style={styles.actionGradient}>
-                <Icon name="checkmark-circle" size={32} color="#10b981" />
-                <Text style={styles.actionText}>Report Found</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('Map')}>
-              <View style={styles.actionGradient}>
-                <Icon name="map" size={32} color="#a855f7" />
-                <Text style={styles.actionText}>View Map</Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionCard} onPress={() => navigation.navigate('Matches')}>
-              <View style={styles.actionGradient}>
-                <Icon name="git-compare" size={32} color="#f59e0b" />
-                <Text style={styles.actionText}>All Matches</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.ScrollView>
-
-      {/* Floating Action Button */}
-      <Animated.View style={styles.floatingButton}>
-        <TouchableOpacity onPress={() => navigation.navigate('CreateItem', { type: 'lost' })} activeOpacity={0.9}>
-          <LinearGradient colors={['#7c3aed', '#a855f7']} style={styles.floatingButtonGradient}>
-            <Icon name="add" size={28} color="#fff" />
-          </LinearGradient>
-        </TouchableOpacity>
-      </Animated.View>
+// ─── Status pill helper ────────────────────────────────────────────────────────
+function StatusPill({ status, C }) {
+  const map = {
+    pending:  { bg: C.amberMuted, fg: C.amber },
+    approved: { bg: C.greenMuted, fg: C.green },
+    rejected: { bg: C.redMuted,   fg: C.red   },
+    found:    { bg: C.blueMuted,  fg: C.blue  },
+    claimed:  { bg: C.greenMuted, fg: C.green },
+  };
+  const s = map[status] || map.pending;
+  return (
+    <View style={[styles.statusPill, { backgroundColor: s.bg }]}>
+      <Text style={[styles.statusPillText, { color: s.fg }]}>{(status || 'pending').toUpperCase()}</Text>
     </View>
   );
 }
 
-const getStyles = (isDarkMode) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#faf9fe',
-  },
-  scrollView: {
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const styles = StyleSheet.create({
+  root: {
     flex: 1,
   },
+
+  // Header
   header: {
-    paddingTop: 50,
-    paddingBottom: 30,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#edeef5',
-  },
-  headerContent: {
-    paddingHorizontal: 20,
-  },
-  headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    paddingTop: Platform.OS === 'ios' ? 16 : 20,
+    paddingBottom: 20,
   },
-  welcomeText: {
+  headerEyebrow: {
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  headerTitle: {
     fontSize: 28,
-    fontWeight: '800',
-    color: '#1e1b2f',
+    fontWeight: '700',
     letterSpacing: -0.5,
-    marginBottom: 4,
   },
-  subText: {
-    fontSize: 14,
-    color: '#5b5b7a',
+  headerRight: {
+    flexDirection: 'row',
+    gap: 8,
   },
-  logoutButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f3e8ff',
+  iconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  statsGrid: {
+
+  // Greeting strip (admin)
+  greetingStrip: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 16,
-    gap: 16,
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 24,
+  },
+  avatarSmall: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarInitial: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  greetingName: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  greetingRole: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+
+  // Hero strip (user)
+  heroStrip: {
+    flexDirection: 'row',
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+    marginBottom: 24,
+  },
+  heroItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  heroValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  heroLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginTop: 3,
+  },
+
+  // Section label
+  sectionLabel: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  sectionLabelLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sectionDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  sectionLabelText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  sectionAction: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  // Stats row
+  statsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
   },
   statCard: {
     flex: 1,
-    minWidth: (width - 48) / 2 - 16,
-  },
-  statGradient: {
-    borderRadius: 20,
-    padding: 16,
-    alignItems: 'center',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    backgroundColor: isDarkMode ? '#191624' : '#ffffff',
-  },
-  statIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
+    padding: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
+    gap: 6,
   },
-  iconPurpleLight: { backgroundColor: isDarkMode ? '#2d2648' : '#f3e8ff' },
-  iconGreenLight: { backgroundColor: isDarkMode ? 'rgba(16,185,129,0.15)' : '#e6f7e6' },
-  iconTealLight: { backgroundColor: isDarkMode ? 'rgba(16,185,129,0.15)' : '#e6f7e6' },
-  iconAmberLight: { backgroundColor: isDarkMode ? 'rgba(245,158,11,0.15)' : '#fff3e0' },
+  statIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   statValue: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '800',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-    marginBottom: 4,
+    letterSpacing: -0.5,
   },
   statLabel: {
-    fontSize: 12,
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-    fontWeight: '500',
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
-  sectionCard: {
-    backgroundColor: isDarkMode ? '#191624' : '#ffffff',
+
+  // List card
+  listCard: {
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    borderRadius: 20,
-    marginHorizontal: 16,
-    marginBottom: 20,
     overflow: 'hidden',
   },
-  sectionHeader: {
+  listCardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
-  },
-  sectionTitleLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
   },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  listCardAccent: {
+    width: 3,
+    height: 14,
+    borderRadius: 2,
   },
-  viewAllText: {
-    fontSize: 12,
+  listCardTitle: {
+    flex: 1,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#7c3aed',
   },
-  listItem: {
+  listCardViewAll: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  // Pending rows
+  pendingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
+    gap: 10,
   },
-  listItemContent: {
+  pendingRowInfo: {
     flex: 1,
   },
-  listItemTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-    marginBottom: 4,
+  pendingRowTitle: {
+    fontSize: 13,
+    fontWeight: '500',
   },
-  listItemSubtitle: {
-    fontSize: 12,
-    color: isDarkMode ? '#938bb0' : '#7e7b9a',
+  pendingRowSub: {
+    fontSize: 11,
+    marginTop: 2,
   },
-  actionButtons: {
+  pendingRowActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
-  actionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
+  rowBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     justifyContent: 'center',
+    alignItems: 'center',
   },
-  approveBtn: {
-    backgroundColor: '#10b981',
-  },
-  rejectBtn: {
-    backgroundColor: '#ef4444',
-  },
+
+  // Match row
   matchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
-  },
-  matchInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 10,
   },
-  matchItemName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
+  matchRowLeft: {
+    flex: 1,
   },
-  matchTypeBadge: {
+  matchRowTitle: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  matchRowSub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  matchRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  scorePill: {
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    backgroundColor: isDarkMode ? '#2d2648' : '#f3e8ff',
+    paddingVertical: 3,
+    borderRadius: 6,
   },
-  matchTypeText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#7c3aed',
-  },
-  matchScore: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    marginHorizontal: 8,
-  },
-  scoreHigh: {
-    backgroundColor: isDarkMode ? 'rgba(16,185,129,0.15)' : '#d1fae5',
-  },
-  scoreMedium: {
-    backgroundColor: isDarkMode ? 'rgba(245,158,11,0.15)' : '#fef3c7',
-  },
-  scoreText: {
-    fontSize: 12,
+  scorePillText: {
+    fontSize: 11,
     fontWeight: '700',
-    color: '#10b981',
   },
-  recentSection: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-  },
-  recentGrid: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  recentCard: {
-    flex: 1,
-    backgroundColor: isDarkMode ? '#191624' : '#ffffff',
-    borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    borderRadius: 16,
-    padding: 12,
-  },
-  recentHeader: {
+
+  // Recent row
+  recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingBottom: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
     borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#edeef5',
-    marginBottom: 10,
+    gap: 10,
   },
-  recentTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-  },
-  recentItem: {
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: isDarkMode ? '#2a2438' : '#f1f5f9',
-  },
-  recentItemName: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: isDarkMode ? '#f0edfc' : '#1e1b2f',
-    marginBottom: 2,
-  },
-  recentItemDate: {
-    fontSize: 10,
-    color: isDarkMode ? '#938bb0' : '#7e7b9a',
-  },
-  recentEmpty: {
-    fontSize: 12,
-    color: isDarkMode ? '#938bb0' : '#7e7b9a',
-    textAlign: 'center',
-    paddingVertical: 20,
-  },
-  emptyState: {
-    padding: 48,
-    alignItems: 'center',
-  },
-  emptyStateText: {
-    marginTop: 12,
-    fontSize: 13,
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-  },
-  quickActions: {
-    marginHorizontal: 16,
-    marginBottom: 30,
-  },
-  quickActionsTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 16,
-  },
-  actionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  actionCard: {
-    flex: 1,
-    minWidth: (width - 56) / 2 - 12,
-  },
-  actionGradient: {
-    borderRadius: 20,
-    padding: 20,
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: isDarkMode ? '#2a2438' : '#edeef5',
-    backgroundColor: isDarkMode ? '#191624' : '#ffffff',
-  },
-  actionText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: isDarkMode ? '#b4adcf' : '#5b5b7a',
-  },
-  floatingButton: {
-    position: 'absolute',
-    bottom: 30,
-    right: 20,
-    zIndex: 100,
-  },
-  floatingButtonGradient: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  recentDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
+  },
+  recentRowInfo: {
+    flex: 1,
+  },
+  recentRowName: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  recentRowDate: {
+    fontSize: 10,
+    marginTop: 2,
+  },
+  recentGrid: {
+    marginBottom: 20,
+  },
+
+  // Status pill
+  statusPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 5,
+  },
+  statusPillText: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+
+  // Empty slate
+  emptySlate: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    gap: 8,
+  },
+  emptyIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 12,
+  },
+
+  // Actions
+  actionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 20,
+  },
+  actionChip: {
+    flexBasis: '22%',
+    flexGrow: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionChipIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionChipLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  // FAB
+  fab: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 32 : 24,
+    right: 20,
+    shadowColor: '#e50914',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 8,
+  },
+  fabInner: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

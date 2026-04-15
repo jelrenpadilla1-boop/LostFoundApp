@@ -1,5 +1,6 @@
 // src/screens/profile/ProfileScreen.js
-import Icon from '@expo/vector-icons/Ionicons';
+import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
 import {
@@ -8,8 +9,10 @@ import {
   Dimensions,
   Image,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -17,14 +20,15 @@ import {
   View
 } from 'react-native';
 import api from '../../api/client';
-import { pickImage } from '../../components/common/ImagePicker';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
-const API_BASE_URL = 'http://10.214.114.132:8092';
+const API_BASE_URL = 'http://10.116.78.132:8092';
 
 export default function ProfileScreen({ navigation }) {
   const { user, logout, isAdmin, updateUser } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -43,20 +47,30 @@ export default function ProfileScreen({ navigation }) {
   });
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [imageKey, setImageKey] = useState(Date.now());
 
-  // Load fresh user data when screen focuses
   useEffect(() => {
     loadUserData();
   }, []);
+
+  useEffect(() => {
+    setImageError(false);
+    setImageKey(Date.now());
+  }, [formData.profile_photo]);
 
   const loadUserData = async () => {
     try {
       setLoading(true);
       const response = await api.get('/profile');
-      const userData = response.data?.data || response.data?.user || response.data;
       
-      console.log('Profile data received:', JSON.stringify(userData, null, 2));
-      
+      console.log('Full profile response:', JSON.stringify(response.data, null, 2));
+
+      // Handle all possible response shapes
+      const userData =
+        response.data?.data ||
+        response.data?.user ||
+        response.data;
+
       if (userData) {
         setFormData({
           name: userData.name || '',
@@ -65,8 +79,7 @@ export default function ProfileScreen({ navigation }) {
           location: userData.location || '',
           profile_photo: userData.profile_photo || null,
         });
-        
-        // Update auth context if available
+
         if (typeof updateUser === 'function') {
           updateUser(userData);
         }
@@ -89,76 +102,118 @@ export default function ProfileScreen({ navigation }) {
 
   const getImageUrl = (photo) => {
     if (!photo) return null;
-    
-    // If it's already a full URL, return it
-    if (photo.startsWith('http')) {
+
+    // If it's already a full URL
+    if (photo.startsWith('http://') || photo.startsWith('https://')) {
       return photo;
     }
-    
-    // If the photo path is a temp file, return null (not uploaded yet)
-    if (photo.startsWith('/tmp/')) {
+
+    // If it's a local temp file
+    if (photo.startsWith('/tmp/') || photo.startsWith('file://')) {
       return null;
     }
-    
-    // Remove any leading slashes
-    const cleanPath = photo.replace(/^\/+/, '');
-    
-    // Check if the photo path already includes 'storage'
-    if (cleanPath.startsWith('storage/')) {
-      return `${API_BASE_URL}/${cleanPath}`;
+
+    // Remove any leading slash
+    let cleanPath = photo;
+    if (cleanPath.startsWith('/')) {
+      cleanPath = cleanPath.substring(1);
     }
-    
-    // Default: append to storage path
+
+    // Build the URL correctly
+    // The photo path from backend is like: "profile-photos/filename.jpg"
+    // Full URL should be: http://10.116.78.132:8092/storage/profile-photos/filename.jpg
     return `${API_BASE_URL}/storage/${cleanPath}`;
+  };
+
+  const pickImage = async () => {
+    try {
+      // Request permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Needed', 'Please grant permission to access your photos');
+        return null;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+        base64: false,
+        aspect: [1, 1],
+      });
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const asset = result.assets[0];
+
+        // Get file extension
+        const uriParts = asset.uri.split('.');
+        const fileExt = uriParts[uriParts.length - 1] || 'jpg';
+        const fileName = `profile_${Date.now()}.${fileExt}`;
+
+        // Fix URI for Android
+        let imageUri = asset.uri;
+        if (Platform.OS === 'android' && !imageUri.startsWith('file://')) {
+          imageUri = `file://${imageUri}`;
+        }
+
+        return {
+          uri: imageUri,
+          type: `image/${fileExt}`,
+          name: fileName,
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error('Image picker error:', error);
+      Alert.alert('Error', 'Failed to pick image');
+      return null;
+    }
   };
 
   const handleImagePick = async () => {
     const image = await pickImage();
     if (!image) return;
 
+    // Create form data
     const photoForm = new FormData();
     photoForm.append('profile_photo', {
       uri: image.uri,
-      name: 'photo.jpg',
-      type: 'image/jpeg',
+      name: image.name,
+      type: image.type,
     });
 
     try {
       setUploadingPhoto(true);
-      // Use PUT /profile endpoint for updating profile (including photo)
-      // This is the correct endpoint based on your routes
-      const response = await api.put('/profile', photoForm, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      
+      const response = await api.post('/profile/upload-photo', photoForm, {
+        headers: { 
+          'Content-Type': 'multipart/form-data',
+        },
       });
 
-      console.log('Profile update response:', JSON.stringify(response.data, null, 2));
+      console.log('Upload response:', JSON.stringify(response.data, null, 2));
 
-      const updatedUser = response.data?.data || response.data?.user || response.data;
-      
-      if (updatedUser) {
-        // Update local form data with the new profile photo
-        setFormData((prev) => ({
-          ...prev,
-          name: updatedUser.name || prev.name,
-          email: updatedUser.email || prev.email,
-          phone: updatedUser.phone || prev.phone,
-          location: updatedUser.location || prev.location,
-          profile_photo: updatedUser.profile_photo || null,
+      if (response.data?.success && response.data?.data) {
+        const updatedUser = response.data.data;
+        setFormData(prev => ({ 
+          ...prev, 
+          profile_photo: updatedUser.profile_photo,
         }));
-        
         setImageError(false);
+        setImageKey(Date.now());
         
         if (typeof updateUser === 'function') {
           updateUser(updatedUser);
         }
         
-        Alert.alert('Success', 'Profile updated successfully');
+        Alert.alert('Success', 'Profile photo updated successfully');
       } else {
-        Alert.alert('Error', 'Failed to update profile');
+        Alert.alert('Error', 'Failed to update profile photo');
       }
     } catch (error) {
-      console.error('Profile update error:', error);
-      Alert.alert('Error', error.response?.data?.message || 'Failed to update profile');
+      console.error('Upload error:', error.response?.data || error.message);
+      Alert.alert('Error', error.response?.data?.message || 'Failed to update profile photo. Please try again.');
     } finally {
       setUploadingPhoto(false);
     }
@@ -174,9 +229,14 @@ export default function ProfileScreen({ navigation }) {
         location: formData.location,
       });
 
-      const updatedUser = response.data?.data || response.data?.user || response.data || {};
+      console.log('Update profile response:', JSON.stringify(response.data, null, 2));
 
-      setFormData((prev) => ({
+      const updatedUser =
+        response.data?.data ||
+        response.data?.user ||
+        response.data || {};
+
+      setFormData(prev => ({
         ...prev,
         name: updatedUser.name || prev.name,
         email: updatedUser.email || prev.email,
@@ -191,6 +251,7 @@ export default function ProfileScreen({ navigation }) {
       Alert.alert('Success', 'Profile updated successfully');
       setEditing(false);
     } catch (error) {
+      console.error('Update profile error:', error.response?.data);
       Alert.alert('Error', error.response?.data?.message || 'Failed to update profile');
     } finally {
       setLoading(false);
@@ -203,8 +264,8 @@ export default function ProfileScreen({ navigation }) {
       return;
     }
 
-    if (passwordData.new_password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    if (passwordData.new_password.length < 8) {
+      Alert.alert('Error', 'Password must be at least 8 characters');
       return;
     }
 
@@ -223,6 +284,7 @@ export default function ProfileScreen({ navigation }) {
         new_password_confirmation: '',
       });
     } catch (error) {
+      console.error('Password update error:', error.response?.data);
       Alert.alert('Error', error.response?.data?.message || 'Failed to update password');
     } finally {
       setLoading(false);
@@ -240,13 +302,16 @@ export default function ProfileScreen({ navigation }) {
     );
   };
 
+  // Get the image URL to display
   const imageUrl = getImageUrl(formData.profile_photo);
   
-  // Debug log
-  console.log('Profile photo path:', formData.profile_photo);
-  console.log('Full image URL:', imageUrl);
+  // Add cache buster to force refresh
+  const finalImageUrl = imageUrl ? `${imageUrl}?t=${imageKey}` : null;
 
-  // Format date properly
+  console.log('Profile photo path:', formData.profile_photo);
+  console.log('Generated image URL:', imageUrl);
+  console.log('Final URL with cache buster:', finalImageUrl);
+
   const formatMemberSince = (dateString) => {
     if (!dateString) return 'Not available';
     try {
@@ -260,497 +325,393 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
+  const s = getStyles(isDark);
+
   if (loading && !refreshing) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7c3aed" />
-        <Text style={styles.loadingText}>Loading profile...</Text>
+      <View style={[s.center, { backgroundColor: isDark ? '#141414' : '#f8fafc' }]}>
+        <ActivityIndicator size="large" color="#e50914" />
+        <Text style={[s.loadingText, { color: isDark ? '#b3b3b3' : '#64748b' }]}>Loading profile...</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView 
-      style={styles.container} 
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#7c3aed']} tintColor="#7c3aed" />
-      }
-    >
-      {/* Header Section - Clean White Background */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Icon name="arrow-back" size={24} color="#7c3aed" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Profile</Text>
-          <View style={styles.headerRight} />
-        </View>
-      </View>
-
-      {/* Profile Card */}
-      <View style={styles.profileCard}>
-        <View style={styles.avatarContainer}>
-          <TouchableOpacity onPress={handleImagePick} style={styles.avatarTouch}>
-            {imageUrl && !imageError ? (
-              <Image
-                source={{ uri: imageUrl }}
-                style={styles.avatar}
-                onError={(e) => {
-                  console.log('Image load error:', e.nativeEvent.error);
-                  setImageError(true);
-                }}
-                onLoad={() => {
-                  console.log('Image loaded successfully');
-                  setImageError(false);
-                }}
-              />
-            ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarText}>
-                  {formData.name?.charAt(0).toUpperCase() || '?'}
-                </Text>
-              </View>
-            )}
-            {uploadingPhoto ? (
-              <View style={styles.editPhotoBadge}>
-                <ActivityIndicator size="small" color="#fff" />
-              </View>
-            ) : (
-              <View style={styles.editPhotoBadge}>
-                <Icon name="camera" size={16} color="#fff" />
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.name}>{formData.name || 'User'}</Text>
-        <View style={styles.roleBadge}>
-          <Icon
-            name={isAdmin ? 'shield' : 'person'}
-            size={12}
-            color={isAdmin ? '#7c3aed' : '#10b981'}
+    <>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor="transparent" translucent />
+      <ScrollView
+        style={[s.container, { backgroundColor: isDark ? '#141414' : '#f8fafc' }]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#e50914']}
+            tintColor="#e50914"
           />
-          <Text style={[styles.roleText, isAdmin ? styles.adminRole : styles.userRole]}>
-            {isAdmin ? 'Administrator' : 'Member'}
-          </Text>
-        </View>
-      </View>
-
-      {/* Profile Information Section */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleContainer}>
-            <Icon name="person-outline" size={20} color="#7c3aed" />
-            <Text style={styles.sectionTitle}>Profile Information</Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => setEditing(!editing)}
-            style={styles.editButton}
-          >
-            <Icon name={editing ? 'close-outline' : 'create-outline'} size={18} color="#7c3aed" />
-            <Text style={styles.editButtonText}>{editing ? 'Cancel' : 'Edit'}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {editing ? (
-          <View style={styles.editForm}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Full Name</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your name"
-                value={formData.name}
-                onChangeText={(text) => setFormData({ ...formData, name: text })}
-                placeholderTextColor="#94a3b8"
-              />
-            </View>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email Address</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your email"
-                value={formData.email}
-                onChangeText={(text) => setFormData({ ...formData, email: text })}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                placeholderTextColor="#94a3b8"
-              />
-            </View>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Phone Number</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your phone number"
-                value={formData.phone}
-                onChangeText={(text) => setFormData({ ...formData, phone: text })}
-                keyboardType="phone-pad"
-                placeholderTextColor="#94a3b8"
-              />
-            </View>
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Location</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your location"
-                value={formData.location}
-                onChangeText={(text) => setFormData({ ...formData, location: text })}
-                placeholderTextColor="#94a3b8"
-              />
-            </View>
-            <TouchableOpacity style={styles.saveButton} onPress={handleUpdateProfile}>
-              <LinearGradient colors={['#7c3aed', '#a855f7']} style={styles.saveGradient}>
-                <Icon name="save-outline" size={18} color="#fff" />
-                <Text style={styles.saveButtonText}>Save Changes</Text>
-              </LinearGradient>
+        }
+      >
+        {/* Header */}
+        <LinearGradient
+          colors={isDark ? ['#1a1a1a', '#141414'] : ['#ffffff', '#f8fafc']}
+          style={s.header}
+        >
+          <View style={s.headerContent}>
+            <TouchableOpacity style={s.backButton} onPress={() => navigation.goBack()}>
+              <Feather name="arrow-left" size={22} color="#e50914" />
+            </TouchableOpacity>
+            <Text style={[s.headerTitle, { color: isDark ? '#ffffff' : '#1a1a1a' }]}>Profile</Text>
+            <TouchableOpacity style={s.themeToggle} onPress={toggleTheme}>
+              <Feather name={isDark ? 'sun' : 'moon'} size={18} color="#e50914" />
             </TouchableOpacity>
           </View>
-        ) : (
-          <View style={styles.infoContainer}>
-            <View style={styles.infoRow}>
-              <View style={styles.infoIcon}>
-                <Icon name="person-outline" size={16} color="#7c3aed" />
-              </View>
-              <Text style={styles.infoLabel}>Name</Text>
-              <Text style={styles.infoValue}>{formData.name || 'Not set'}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <View style={styles.infoIcon}>
-                <Icon name="mail-outline" size={16} color="#7c3aed" />
-              </View>
-              <Text style={styles.infoLabel}>Email</Text>
-              <Text style={styles.infoValue}>{formData.email || 'Not set'}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <View style={styles.infoIcon}>
-                <Icon name="call-outline" size={16} color="#7c3aed" />
-              </View>
-              <Text style={styles.infoLabel}>Phone</Text>
-              <Text style={styles.infoValue}>{formData.phone || 'Not set'}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <View style={styles.infoIcon}>
-                <Icon name="location-outline" size={16} color="#7c3aed" />
-              </View>
-              <Text style={styles.infoLabel}>Location</Text>
-              <Text style={styles.infoValue}>{formData.location || 'Not set'}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <View style={styles.infoIcon}>
-                <Icon name="calendar-outline" size={16} color="#7c3aed" />
-              </View>
-              <Text style={styles.infoLabel}>Member Since</Text>
-              <Text style={styles.infoValue}>
-                {user?.created_at ? formatMemberSince(user.created_at) : 'Not available'}
+        </LinearGradient>
+
+        {/* Profile Card */}
+        <View style={[s.profileCard, {
+          backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+          borderColor: isDark ? '#333333' : '#edeef5',
+        }]}>
+          <View style={s.avatarContainer}>
+            <TouchableOpacity onPress={handleImagePick} style={s.avatarTouch} disabled={uploadingPhoto}>
+              {finalImageUrl && !imageError ? (
+                <Image
+                  key={finalImageUrl}
+                  source={{ uri: finalImageUrl }}
+                  style={s.avatar}
+                  onError={(e) => {
+                    console.log('Image load error:', e.nativeEvent.error);
+                    console.log('Failed URL:', finalImageUrl);
+                    setImageError(true);
+                  }}
+                  onLoad={() => {
+                    console.log('Image loaded successfully:', finalImageUrl);
+                    setImageError(false);
+                  }}
+                />
+              ) : (
+                <View style={[s.avatarPlaceholder, { backgroundColor: '#e50914' }]}>
+                  <Text style={s.avatarText}>
+                    {formData.name?.charAt(0).toUpperCase() || '?'}
+                  </Text>
+                </View>
+              )}
+              {uploadingPhoto ? (
+                <View style={s.editPhotoBadge}>
+                  <ActivityIndicator size="small" color="#fff" />
+                </View>
+              ) : (
+                <View style={s.editPhotoBadge}>
+                  <Feather name="camera" size={14} color="#fff" />
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <Text style={[s.name, { color: isDark ? '#ffffff' : '#0f172a' }]}>
+            {formData.name || 'User'}
+          </Text>
+
+          <View style={s.roleBadge}>
+            <Feather
+              name={isAdmin ? 'shield' : 'user'}
+              size={12}
+              color={isAdmin ? '#e50914' : '#10b981'}
+            />
+            <Text style={[s.roleText, isAdmin ? s.adminRole : s.userRole]}>
+              {isAdmin ? 'Administrator' : 'Member'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Profile Information */}
+        <View style={[s.section, {
+          backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+          borderColor: isDark ? '#333333' : '#edeef5',
+        }]}>
+          <View style={s.sectionHeader}>
+            <View style={s.sectionTitleContainer}>
+              <Feather name="user" size={18} color="#e50914" />
+              <Text style={[s.sectionTitle, { color: isDark ? '#ffffff' : '#0f172a' }]}>
+                Profile Information
               </Text>
             </View>
-          </View>
-        )}
-      </View>
-
-      {/* Security Section */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleContainer}>
-            <Icon name="shield-outline" size={20} color="#7c3aed" />
-            <Text style={styles.sectionTitle}>Security</Text>
-          </View>
-        </View>
-        <TouchableOpacity style={styles.menuItem} onPress={() => setShowPasswordModal(true)}>
-          <View style={styles.menuIcon}>
-            <Icon name="lock-closed-outline" size={20} color="#7c3aed" />
-          </View>
-          <Text style={styles.menuText}>Change Password</Text>
-          <Icon name="chevron-forward" size={20} color="#cbd5e1" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Admin Section */}
-      {isAdmin && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleContainer}>
-              <Icon name="settings-outline" size={20} color="#7c3aed" />
-              <Text style={styles.sectionTitle}>Administration</Text>
-            </View>
-          </View>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('AdminDashboard')}
-          >
-            <View style={styles.menuIcon}>
-              <Icon name="stats-chart-outline" size={20} color="#7c3aed" />
-            </View>
-            <Text style={styles.menuText}>Admin Dashboard</Text>
-            <Icon name="chevron-forward" size={20} color="#cbd5e1" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('ManageUsers')}
-          >
-            <View style={styles.menuIcon}>
-              <Icon name="people-outline" size={20} color="#7c3aed" />
-            </View>
-            <Text style={styles.menuText}>Manage Users</Text>
-            <Icon name="chevron-forward" size={20} color="#cbd5e1" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Logout Button */}
-      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-        <Icon name="log-out-outline" size={20} color="#ef4444" />
-        <Text style={styles.logoutText}>Logout</Text>
-      </TouchableOpacity>
-
-      {/* Change Password Modal */}
-      <Modal visible={showPasswordModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <LinearGradient
-              colors={['#7c3aed', '#a855f7']}
-              style={styles.modalHeader}
+            <TouchableOpacity
+              onPress={() => setEditing(!editing)}
+              style={[s.editButton, { backgroundColor: isDark ? '#2a2a2a' : '#f1f5f9' }]}
             >
-              <Text style={styles.modalTitle}>Change Password</Text>
-              <TouchableOpacity onPress={() => setShowPasswordModal(false)}>
-                <Icon name="close" size={24} color="#fff" />
-              </TouchableOpacity>
-            </LinearGradient>
+              <Feather name={editing ? 'x' : 'edit-2'} size={14} color="#e50914" />
+              <Text style={s.editButtonText}>{editing ? 'Cancel' : 'Edit'}</Text>
+            </TouchableOpacity>
+          </View>
 
-            <View style={styles.modalBody}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Current Password</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter current password"
-                  secureTextEntry
-                  value={passwordData.current_password}
-                  onChangeText={(text) =>
-                    setPasswordData({ ...passwordData, current_password: text })
-                  }
-                  placeholderTextColor="#94a3b8"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>New Password</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter new password"
-                  secureTextEntry
-                  value={passwordData.new_password}
-                  onChangeText={(text) =>
-                    setPasswordData({ ...passwordData, new_password: text })
-                  }
-                  placeholderTextColor="#94a3b8"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Confirm New Password</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Confirm new password"
-                  secureTextEntry
-                  value={passwordData.new_password_confirmation}
-                  onChangeText={(text) =>
-                    setPasswordData({
-                      ...passwordData,
-                      new_password_confirmation: text,
-                    })
-                  }
-                  placeholderTextColor="#94a3b8"
-                />
-              </View>
-
-              <TouchableOpacity style={styles.modalButton} onPress={handleUpdatePassword}>
-                <LinearGradient
-                  colors={['#7c3aed', '#a855f7']}
-                  style={styles.modalButtonGradient}
-                >
-                  <Text style={styles.modalButtonText}>Update Password</Text>
+          {editing ? (
+            <View style={s.editForm}>
+              {[
+                { label: 'Full Name', key: 'name', placeholder: 'Enter your name', keyboard: 'default', capitalize: 'words' },
+                { label: 'Email Address', key: 'email', placeholder: 'Enter your email', keyboard: 'email-address', capitalize: 'none' },
+                { label: 'Phone Number', key: 'phone', placeholder: 'Enter your phone number', keyboard: 'phone-pad', capitalize: 'none' },
+                { label: 'Location', key: 'location', placeholder: 'Enter your location', keyboard: 'default', capitalize: 'sentences' },
+              ].map(({ label, key, placeholder, keyboard, capitalize }) => (
+                <View key={key} style={s.inputGroup}>
+                  <Text style={[s.inputLabel, { color: isDark ? '#b3b3b3' : '#475569' }]}>{label}</Text>
+                  <TextInput
+                    style={[s.input, {
+                      backgroundColor: isDark ? '#2a2a2a' : '#f8fafc',
+                      borderColor: isDark ? '#444444' : '#e2e8f0',
+                      color: isDark ? '#ffffff' : '#0f172a',
+                    }]}
+                    placeholder={placeholder}
+                    placeholderTextColor={isDark ? '#666666' : '#94a3b8'}
+                    value={formData[key]}
+                    onChangeText={(text) => setFormData(prev => ({ ...prev, [key]: text }))}
+                    keyboardType={keyboard}
+                    autoCapitalize={capitalize}
+                  />
+                </View>
+              ))}
+              <TouchableOpacity style={s.saveButton} onPress={handleUpdateProfile}>
+                <LinearGradient colors={['#e50914', '#b20710']} style={s.saveGradient}>
+                  <Feather name="save" size={16} color="#fff" />
+                  <Text style={s.saveButtonText}>Save Changes</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
-          </View>
+          ) : (
+            <View style={s.infoContainer}>
+              {[
+                { icon: 'user', label: 'Name', value: formData.name },
+                { icon: 'mail', label: 'Email', value: formData.email },
+                { icon: 'phone', label: 'Phone', value: formData.phone },
+                { icon: 'map-pin', label: 'Location', value: formData.location },
+                { icon: 'calendar', label: 'Member Since', value: user?.created_at ? formatMemberSince(user.created_at) : null },
+              ].map(({ icon, label, value }) => (
+                <View key={label} style={s.infoRow}>
+                  <View style={s.infoIcon}>
+                    <Feather name={icon} size={14} color="#e50914" />
+                  </View>
+                  <Text style={[s.infoLabel, { color: isDark ? '#b3b3b3' : '#64748b' }]}>{label}</Text>
+                  <Text style={[s.infoValue, { color: isDark ? '#ffffff' : '#0f172a' }]}>
+                    {value || 'Not set'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
-      </Modal>
-    </ScrollView>
+
+        {/* Security */}
+        <View style={[s.section, {
+          backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+          borderColor: isDark ? '#333333' : '#edeef5',
+        }]}>
+          <View style={s.sectionHeader}>
+            <View style={s.sectionTitleContainer}>
+              <Feather name="shield" size={18} color="#e50914" />
+              <Text style={[s.sectionTitle, { color: isDark ? '#ffffff' : '#0f172a' }]}>Security</Text>
+            </View>
+          </View>
+          <TouchableOpacity style={s.menuItem} onPress={() => setShowPasswordModal(true)}>
+            <View style={s.menuIcon}>
+              <Feather name="lock" size={18} color="#e50914" />
+            </View>
+            <Text style={[s.menuText, { color: isDark ? '#e5e5e5' : '#334155' }]}>Change Password</Text>
+            <Feather name="chevron-right" size={18} color={isDark ? '#666666' : '#cbd5e1'} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Admin Section */}
+        {isAdmin && (
+          <View style={[s.section, {
+            backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+            borderColor: isDark ? '#333333' : '#edeef5',
+          }]}>
+            <View style={s.sectionHeader}>
+              <View style={s.sectionTitleContainer}>
+                <Feather name="settings" size={18} color="#e50914" />
+                <Text style={[s.sectionTitle, { color: isDark ? '#ffffff' : '#0f172a' }]}>Administration</Text>
+              </View>
+            </View>
+            <TouchableOpacity style={s.menuItem} onPress={() => navigation.navigate('AdminDashboard')}>
+              <View style={s.menuIcon}>
+                <Feather name="bar-chart-2" size={18} color="#e50914" />
+              </View>
+              <Text style={[s.menuText, { color: isDark ? '#e5e5e5' : '#334155' }]}>Admin Dashboard</Text>
+              <Feather name="chevron-right" size={18} color={isDark ? '#666666' : '#cbd5e1'} />
+            </TouchableOpacity>
+            <TouchableOpacity style={s.menuItem} onPress={() => navigation.navigate('AdminUsers')}>
+              <View style={s.menuIcon}>
+                <Feather name="users" size={18} color="#e50914" />
+              </View>
+              <Text style={[s.menuText, { color: isDark ? '#e5e5e5' : '#334155' }]}>Manage Users</Text>
+              <Feather name="chevron-right" size={18} color={isDark ? '#666666' : '#cbd5e1'} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Logout */}
+        <TouchableOpacity
+          style={[s.logoutButton, {
+            backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+            borderColor: isDark ? '#442222' : '#fee2e2',
+          }]}
+          onPress={handleLogout}
+        >
+          <Feather name="log-out" size={18} color="#ef4444" />
+          <Text style={s.logoutText}>Logout</Text>
+        </TouchableOpacity>
+
+        {/* Change Password Modal */}
+        <Modal visible={showPasswordModal} animationType="slide" transparent>
+          <View style={s.modalOverlay}>
+            <View style={[s.modalContent, { backgroundColor: isDark ? '#1a1a1a' : '#ffffff' }]}>
+              <LinearGradient colors={['#e50914', '#b20710']} style={s.modalHeader}>
+                <Text style={s.modalTitle}>Change Password</Text>
+                <TouchableOpacity onPress={() => setShowPasswordModal(false)}>
+                  <Feather name="x" size={22} color="#fff" />
+                </TouchableOpacity>
+              </LinearGradient>
+              <View style={s.modalBody}>
+                {[
+                  { label: 'Current Password', key: 'current_password', placeholder: 'Enter current password' },
+                  { label: 'New Password', key: 'new_password', placeholder: 'Enter new password (min 8 characters)' },
+                  { label: 'Confirm New Password', key: 'new_password_confirmation', placeholder: 'Confirm new password' },
+                ].map(({ label, key, placeholder }) => (
+                  <View key={key} style={s.inputGroup}>
+                    <Text style={[s.inputLabel, { color: isDark ? '#b3b3b3' : '#475569' }]}>{label}</Text>
+                    <TextInput
+                      style={[s.input, {
+                        backgroundColor: isDark ? '#2a2a2a' : '#f8fafc',
+                        borderColor: isDark ? '#444444' : '#e2e8f0',
+                        color: isDark ? '#ffffff' : '#0f172a',
+                      }]}
+                      placeholder={placeholder}
+                      placeholderTextColor={isDark ? '#666666' : '#94a3b8'}
+                      secureTextEntry
+                      value={passwordData[key]}
+                      onChangeText={(text) => setPasswordData(prev => ({ ...prev, [key]: text }))}
+                    />
+                  </View>
+                ))}
+                <TouchableOpacity style={s.modalButton} onPress={handleUpdatePassword}>
+                  <LinearGradient colors={['#e50914', '#b20710']} style={s.modalButtonGradient}>
+                    <Text style={s.modalButtonText}>Update Password</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </ScrollView>
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#64748b',
-  },
+const getStyles = (isDark) => StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 12, fontSize: 14 },
   header: {
-    paddingTop: 50,
+    paddingTop: Platform.OS === 'ios' ? 56 : 44,
     paddingBottom: 20,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#edeef5',
+    paddingHorizontal: 20,
   },
   headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#f3e8ff',
+    backgroundColor: isDark ? 'rgba(229,9,20,0.15)' : '#fde8e8',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#1e1b2f',
-  },
-  headerRight: {
+  headerTitle: { fontSize: 20, fontWeight: '600' },
+  themeToggle: {
     width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: isDark ? 'rgba(229,9,20,0.15)' : '#fde8e8',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   profileCard: {
     alignItems: 'center',
-    marginTop: -40,
+    marginTop: -30,
     marginHorizontal: 20,
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 24,
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 3,
-    borderWidth: 1,
-    borderColor: '#edeef5',
   },
-  avatarContainer: {
-    marginTop: -64,
-    marginBottom: 16,
-  },
-  avatarTouch: {
-    position: 'relative',
-  },
+  avatarContainer: { marginTop: -50, marginBottom: 12 },
+  avatarTouch: { position: 'relative' },
   avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 4,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    borderWidth: 3,
+    borderColor: '#e50914',
+    backgroundColor: '#f0f0f0',
   },
   avatarPlaceholder: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 4,
-    borderColor: '#fff',
-    backgroundColor: '#7c3aed',
+    borderWidth: 3,
+    borderColor: '#e50914',
   },
-  avatarText: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
+  avatarText: { fontSize: 36, fontWeight: 'bold', color: '#fff' },
   editPhotoBadge: {
     position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: '#7c3aed',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    bottom: 0,
+    right: 0,
+    backgroundColor: '#e50914',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    borderColor: isDark ? '#1a1a1a' : '#fff',
   },
-  name: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: 8,
-  },
+  name: { fontSize: 20, fontWeight: '700', marginBottom: 6 },
   roleBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 4,
     borderRadius: 20,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: isDark ? '#2a2a2a' : '#f1f5f9',
   },
-  roleText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  adminRole: {
-    color: '#7c3aed',
-  },
-  userRole: {
-    color: '#10b981',
-  },
+  roleText: { fontSize: 11, fontWeight: '600' },
+  adminRole: { color: '#e50914' },
+  userRole: { color: '#10b981' },
   section: {
-    backgroundColor: '#fff',
     marginTop: 16,
     marginHorizontal: 20,
     padding: 20,
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#edeef5',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.02,
-    shadowRadius: 4,
-    elevation: 1,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
-  sectionTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0f172a',
-  },
+  sectionTitleContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sectionTitle: { fontSize: 16, fontWeight: '600' },
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -758,147 +719,69 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: '#f1f5f9',
   },
-  editButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#7c3aed',
-  },
-  infoContainer: {
-    gap: 16,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  infoIcon: {
-    width: 32,
-  },
-  infoLabel: {
-    width: 80,
-    fontSize: 13,
-    color: '#64748b',
-    fontWeight: '500',
-  },
-  infoValue: {
-    flex: 1,
-    fontSize: 13,
-    color: '#0f172a',
-    fontWeight: '500',
-  },
-  editForm: {
-    gap: 16,
-  },
-  inputGroup: {
-    gap: 6,
-  },
+  editButtonText: { fontSize: 12, fontWeight: '500', color: '#e50914' },
+  infoContainer: { gap: 14 },
+  infoRow: { flexDirection: 'row', alignItems: 'center' },
+  infoIcon: { width: 28 },
+  infoLabel: { width: 85, fontSize: 12, fontWeight: '500' },
+  infoValue: { flex: 1, fontSize: 13, fontWeight: '500' },
+  editForm: { gap: 14 },
+  inputGroup: { gap: 6 },
   inputLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
-    color: '#475569',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 12,
+    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
-    color: '#0f172a',
-    backgroundColor: '#f8fafc',
   },
-  saveButton: {
-    marginTop: 8,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
+  saveButton: { marginTop: 8, borderRadius: 10, overflow: 'hidden' },
   saveGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    paddingVertical: 12,
     gap: 8,
   },
-  saveButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  menuIcon: {
-    width: 32,
-  },
-  menuText: {
-    flex: 1,
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#334155',
-    fontWeight: '500',
-  },
+  saveButtonText: { fontSize: 14, fontWeight: '600', color: '#fff' },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  menuIcon: { width: 32 },
+  menuText: { flex: 1, marginLeft: 4, fontSize: 14, fontWeight: '500' },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
     marginHorizontal: 20,
     marginTop: 16,
     marginBottom: 40,
-    padding: 16,
-    borderRadius: 16,
+    padding: 14,
+    borderRadius: 12,
     gap: 8,
     borderWidth: 1,
-    borderColor: '#fee2e2',
   },
-  logoutText: {
-    fontSize: 14,
-    color: '#ef4444',
-    fontWeight: '600',
-  },
+  logoutText: { fontSize: 14, color: '#ef4444', fontWeight: '600' },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     padding: 20,
   },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
+  modalContent: { borderRadius: 20, overflow: 'hidden' },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  modalBody: {
-    padding: 20,
-    gap: 16,
-  },
-  modalButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 8,
-  },
-  modalButtonGradient: {
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  modalButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  modalBody: { padding: 20, gap: 16 },
+  modalButton: { borderRadius: 10, overflow: 'hidden', marginTop: 8 },
+  modalButtonGradient: { paddingVertical: 14, alignItems: 'center' },
+  modalButtonText: { fontSize: 14, fontWeight: '600', color: '#fff' },
 });

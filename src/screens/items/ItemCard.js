@@ -1,25 +1,44 @@
 // src/components/items/ItemCard.js
+import { LinearGradient } from 'expo-linear-gradient';
 import {
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 
+const API_BASE_URL = 'http://10.116.78.132:8092';
+
 export default function ItemCard({ item, type, onPress }) {
+  
+  const getImageUrl = (photo) => {
+    if (!photo) return null;
+    if (photo.startsWith('http')) return photo;
+    if (photo.startsWith('/storage/')) {
+      return `${API_BASE_URL}${photo}`;
+    }
+    return `${API_BASE_URL}/storage/${photo}`;
+  };
+
   const getStatusColor = (status) => {
-    switch (status) {
+    console.log('Status received:', status); // Debug log
+    
+    switch (status?.toLowerCase()) {
       case 'approved':
+      case 'active':
         return '#4caf50';
       case 'pending':
         return '#ff9800';
       case 'found':
+        return '#2196f3';
       case 'claimed':
         return '#2196f3';
       case 'returned':
         return '#9c27b0';
+      case 'recovered':
+        return '#2e7d32';
       case 'rejected':
         return '#f44336';
       default:
@@ -28,35 +47,85 @@ export default function ItemCard({ item, type, onPress }) {
   };
 
   const getStatusText = (status) => {
-    return status.charAt(0).toUpperCase() + status.slice(1);
+    const statusMap = {
+      pending: 'Pending',
+      approved: 'Active',
+      active: 'Active',
+      found: 'Found',
+      claimed: 'Claimed',
+      returned: 'Returned',
+      recovered: 'Recovered',
+      rejected: 'Rejected',
+    };
+    return statusMap[status?.toLowerCase()] || status || 'Unknown';
   };
 
+  const getLocationText = () => {
+    if (type === 'lost') {
+      return item.lost_location || 'Location not specified';
+    }
+    return item.found_location || 'Location not specified';
+  };
+
+  const getDateText = () => {
+    if (type === 'lost') {
+      return item.date_lost ? new Date(item.date_lost).toLocaleDateString() : 'Date not specified';
+    }
+    return item.date_found ? new Date(item.date_found).toLocaleDateString() : 'Date not specified';
+  };
+
+  const getDateLabel = () => {
+    return type === 'lost' ? 'Lost on' : 'Found on';
+  };
+
+  const imageUrl = getImageUrl(item.photo);
+
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress}>
-      {item.photo ? (
-        <Image source={{ uri: item.photo }} style={styles.image} />
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
+      {imageUrl ? (
+        <Image 
+          source={{ uri: imageUrl }} 
+          style={styles.image}
+        />
       ) : (
-        <View style={[styles.image, styles.placeholder]}>
-          <Icon name="image-outline" size={32} color="#ccc" />
-        </View>
+        <LinearGradient
+          colors={['#e50914', '#b20710']}
+          style={[styles.image, styles.placeholder]}
+        >
+          <Icon name="image-outline" size={32} color="#fff" />
+        </LinearGradient>
       )}
       <View style={styles.content}>
         <Text style={styles.name} numberOfLines={1}>
-          {item.item_name}
+          {item.item_name || 'Unnamed Item'}
         </Text>
-        <Text style={styles.category}>{item.category}</Text>
-        <Text style={styles.location} numberOfLines={1}>
+        <Text style={styles.category}>{item.category || 'Uncategorized'}</Text>
+        
+        <View style={styles.locationContainer}>
           <Icon name="location-outline" size={12} color="#999" />
-          {' '}
-          {type === 'lost' ? item.lost_location : item.found_location || 'Location not specified'}
-        </Text>
+          <Text style={styles.location} numberOfLines={1}>
+            {getLocationText()}
+          </Text>
+        </View>
+        
         <Text style={styles.date}>
-          {type === 'lost' ? 'Lost on' : 'Found on'}{' '}
-          {new Date(type === 'lost' ? item.date_lost : item.date_found).toLocaleDateString()}
+          {getDateLabel()} {getDateText()}
         </Text>
+        
+        {/* ALWAYS show status badge - backend already filters */}
         <View style={[styles.status, { backgroundColor: getStatusColor(item.status) }]}>
           <Text style={styles.statusText}>{getStatusText(item.status)}</Text>
         </View>
+        
+        {/* Show user info for admin view */}
+        {item.user && item.user.name && (
+          <View style={styles.userContainer}>
+            <Icon name="person-outline" size={10} color="#999" />
+            <Text style={styles.userName} numberOfLines={1}>
+              {item.user.name}
+            </Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -71,10 +140,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   image: {
     width: 100,
@@ -96,29 +165,46 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   category: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666',
     marginBottom: 4,
+    textTransform: 'capitalize',
   },
-  location: {
-    fontSize: 12,
-    color: '#999',
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 2,
   },
+  location: {
+    fontSize: 11,
+    color: '#999',
+    marginLeft: 2,
+    flex: 1,
+  },
   date: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#999',
     marginBottom: 6,
   },
   status: {
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: 4,
   },
   statusText: {
     fontSize: 10,
     color: '#fff',
     fontWeight: 'bold',
+  },
+  userContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  userName: {
+    fontSize: 10,
+    color: '#999',
+    marginLeft: 2,
   },
 });

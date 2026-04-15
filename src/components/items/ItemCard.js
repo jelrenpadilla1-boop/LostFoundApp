@@ -1,10 +1,10 @@
 import Icon from '@expo/vector-icons/Ionicons';
 import {
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 export default function ItemCard({ item, type, onPress }) {
@@ -33,7 +33,7 @@ export default function ItemCard({ item, type, onPress }) {
   const imageUrl = item.photo 
     ? item.photo.startsWith('http') 
       ? item.photo 
-      : `http://192.168.1.100:8000/storage/${item.photo}`
+      : `http://10.116.78.132:8000/storage/${item.photo}`
     : null;
 
   return (

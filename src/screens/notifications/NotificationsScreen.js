@@ -1,30 +1,34 @@
 import Icon from '@expo/vector-icons/Ionicons';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { notificationsAPI } from '../../api/notifications';
-import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 
 export default function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { user } = useAuth();
-  const { subscribeToNotifications } = useSocket();
+  const { addNotificationListener } = useSocket();
 
   useEffect(() => {
     loadNotifications();
-    setupSocket();
   }, []);
+
+  useEffect(() => {
+    const unsub = addNotificationListener((data) => {
+      setNotifications(prev => [data, ...prev]);
+    });
+    return () => unsub();
+  }, [addNotificationListener]);
 
   const loadNotifications = async () => {
     try {
@@ -35,17 +39,6 @@ export default function NotificationsScreen({ navigation }) {
     } finally {
       setLoading(false);
       setRefreshing(false);
-    }
-  };
-
-  const setupSocket = () => {
-    if (user) {
-      subscribeToNotifications(user.id, {
-        onNotification: (data) => {
-          // Add new notification to the list
-          setNotifications(prev => [data.notification, ...prev]);
-        },
-      });
     }
   };
 

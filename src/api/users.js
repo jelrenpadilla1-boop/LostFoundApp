@@ -6,14 +6,24 @@ export const usersAPI = {
     getUsers: async (params = {}) => {
         try {
             const response = await api.get('/users', { params });
-            if (response.data && response.data.success === true) {
-                return { data: response.data.users || [], success: true };
-            } else if (response.data && response.data.data) {
-                return { data: response.data.data, success: true };
-            } else if (Array.isArray(response.data)) {
-                return { data: response.data, success: true };
+            const d = response.data;
+            let users = [];
+
+            if (d?.success === false) {
+                return { data: [], success: false, message: d.message };
+            } else if (Array.isArray(d)) {
+                users = d;
+            } else if (Array.isArray(d?.data) && d.data.length > 0) {
+                users = d.data;                     // { data: [...] }
+            } else if (Array.isArray(d?.users)) {
+                users = d.users;                    // { users: [...] }
+            } else if (d?.success === true) {
+                users = d.users || d.data || [];    // { success: true, users/data: [...] }
+            } else if (Array.isArray(d?.data)) {
+                users = d.data;                     // { data: [] } legitimate empty list
             }
-            return { data: response.data || [], success: true };
+
+            return { data: users, success: true };
         } catch (error) {
             console.error('Error fetching users:', error);
             if (error.response?.status === 401 || error.userMessage === 'Unauthenticated') {
