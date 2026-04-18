@@ -1,22 +1,19 @@
 {
   "expo": {
     "name": "Foundify",
-    "slug": "lost-found-app",
+    "slug": "foundify-app-2025",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "light",
-
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-
     "assetBundlePatterns": [
       "**/*"
     ],
-
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.yourcompany.lostfound",
@@ -26,7 +23,6 @@
         "NSLocationWhenInUseUsageDescription": "This app needs access to location to show items near you"
       }
     },
-
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -42,15 +38,15 @@
         "ACCESS_COARSE_LOCATION"
       ]
     },
-
     "web": {
       "favicon": "./assets/images/favicon.png"
     },
-
     "extra": {
-      "apiUrl": "192.168.1.100"
+      "apiUrl": "172.29.250.132",
+      "eas": {
+        "projectId": "28cffc51-a616-4148-bbf2-62661da7e099"
+      }
     },
-
     "plugins": [
       [
         "expo-notifications",

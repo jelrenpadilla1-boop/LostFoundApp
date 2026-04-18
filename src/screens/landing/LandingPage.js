@@ -84,13 +84,7 @@ export default function LandingPage({ navigation }) {
           </TouchableOpacity>
 
           <View style={styles.navActions}>
-            <TouchableOpacity
-              style={styles.themeToggle}
-              activeOpacity={0.8}
-              onPress={toggleTheme} // ← USE TOGGLE FROM CONTEXT
-            >
-              <Feather name={isDark ? 'sun' : 'moon'} size={18} color="#e50914" />
-            </TouchableOpacity>
+           
 
             <TouchableOpacity
               style={[styles.navSignIn, { borderColor: theme.border }]}

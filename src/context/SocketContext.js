@@ -10,7 +10,7 @@ const SocketContext = createContext();
 
 export const useSocket = () => useContext(SocketContext);
 
-const API_BASE_URL = 'http://10.116.78.132:8092/api';
+const API_BASE_URL = 'http://172.29.250.132:8092/api';
 
 export const SocketProvider = ({ children }) => {
   const { user, isAdmin } = useAuth();

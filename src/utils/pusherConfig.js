@@ -1,7 +1,7 @@
 // src/utils/pusherConfig.js
 export const getPusherConfig = () => {
   // Get your computer's IP - replace with actual IP
-  const YOUR_COMPUTER_IP = '10.116.78.132';
+  const YOUR_COMPUTER_IP = '172.29.250.132';
   
   // For development with Expo Go
   if (__DEV__) {
@@ -18,7 +18,7 @@ export const getPusherConfig = () => {
   return {
     key: '9d07def6364aafd87b17',
     cluster: 'ap1',
-    authEndpoint: 'https://yourdomain.com/broadcasting/auth',
+    authEndpoint: 'http://172.29.250.132:8092/api/broadcasting/auth',
     enableStats: true,
   };
 };

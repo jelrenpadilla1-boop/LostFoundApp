@@ -162,14 +162,7 @@ export default function MyLostItemsScreen({ navigation }) {
     const theme = isDark ? darkTheme : lightTheme;
     return (
       <View style={[styles.header, { backgroundColor: theme.background, borderBottomColor: theme.border }]}>
-        <TouchableOpacity 
-          onPress={() => navigation.goBack()} 
-          style={[styles.headerBackButton, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}
-        >
-          <Feather name="chevron-left" size={24} color={isDark ? '#ffffff' : '#1a1a1a'} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>My Lost Items</Text>
-       
+      
       </View>
     );
   };
@@ -234,13 +227,7 @@ export default function MyLostItemsScreen({ navigation }) {
           <Text style={[styles.statLabel, { color: theme.textMuted }]}>Found</Text>
         </View>
         
-        <View style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <View style={[styles.statIconContainer, { backgroundColor: 'rgba(16,185,129,0.1)' }]}>
-            <Feather name="award" size={20} color="#10b981" />
-          </View>
-          <Text style={[styles.statValue, { color: '#10b981' }]}>{stats.recovered}</Text>
-          <Text style={[styles.statLabel, { color: theme.textMuted }]}>Recovered</Text>
-        </View>
+       
         
         {stats.returned > 0 && (
           <View style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>

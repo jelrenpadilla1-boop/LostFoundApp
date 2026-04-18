@@ -1,6 +1,5 @@
 // src/screens/items/LostItemsScreen.js
 import { Feather } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -24,7 +23,7 @@ import { lostItemsAPI } from '../../api/items';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE_URL = 'http://10.116.78.132:8092';
+const API_BASE_URL = 'http://172.29.250.132:8092';
 
 export default function LostItemsScreen({ navigation }) {
   const { width } = useWindowDimensions();
@@ -47,6 +46,9 @@ export default function LostItemsScreen({ navigation }) {
   
   const scrollY = useRef(new Animated.Value(0)).current;
   const floatingButtonAnim = useRef(new Animated.Value(0)).current;
+  
+  // Debounce timeout ref
+  const searchTimeoutRef = useRef(null);
 
   const styles = getStyles(isDark);
 
@@ -68,31 +70,8 @@ export default function LostItemsScreen({ navigation }) {
     { icon: 'check', label: 'Returned', value: 0, color: '#2e7d32' },
   ]);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadItems();
-    }, [selectedCategory, selectedStatus, activeTab])
-  );
-
-  useEffect(() => {
-    Animated.spring(floatingButtonAnim, {
-      toValue: 1,
-      tension: 50,
-      friction: 7,
-      useNativeDriver: true,
-    }).start();
-  }, []);
-
-  const getImageUrl = (photo) => {
-    if (!photo) return null;
-    if (photo.startsWith('http')) return photo;
-    if (photo.startsWith('/storage/')) {
-      return `${API_BASE_URL}${photo}`;
-    }
-    return `${API_BASE_URL}/storage/${photo}`;
-  };
-
-  const loadItems = async () => {
+  // Memoize loadItems to avoid recreation on every render
+  const loadItems = useCallback(async () => {
     try {
       setLoading(true);
       const params = {};
@@ -184,6 +163,48 @@ export default function LostItemsScreen({ navigation }) {
       setLoading(false);
       setRefreshing(false);
     }
+  }, [selectedCategory, selectedStatus, searchQuery, activeTab, isAdmin]);
+
+  // Debounced search effect
+  useEffect(() => {
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    // Set new timeout
+    searchTimeoutRef.current = setTimeout(() => {
+      loadItems();
+    }, 500);
+    
+    // Cleanup on unmount or dependency change
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery, selectedCategory, selectedStatus, activeTab, loadItems]);
+
+  // Initial load when screen mounts
+  useEffect(() => {
+    loadItems();
+  }, []);
+
+  useEffect(() => {
+    Animated.spring(floatingButtonAnim, {
+      toValue: 1,
+      tension: 50,
+      friction: 7,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  const getImageUrl = (photo) => {
+    if (!photo) return null;
+    if (photo.startsWith('http')) return photo;
+    if (photo.startsWith('/storage/')) {
+      return `${API_BASE_URL}${photo}`;
+    }
+    return `${API_BASE_URL}/storage/${photo}`;
   };
 
   const onRefresh = () => {
@@ -193,8 +214,6 @@ export default function LostItemsScreen({ navigation }) {
 
   const handleSearch = (text) => {
     setSearchQuery(text);
-    const timeoutId = setTimeout(() => loadItems(), 500);
-    return () => clearTimeout(timeoutId);
   };
 
   const getStatusColor = (status) => {
@@ -256,7 +275,7 @@ export default function LostItemsScreen({ navigation }) {
             onSubmitEditing={loadItems}
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => { setSearchQuery(''); loadItems(); }}>
+            <TouchableOpacity onPress={() => { setSearchQuery(''); }}>
               <Feather name="x-circle" size={18} color={isDark ? '#666666' : '#94a3b8'} />
             </TouchableOpacity>
           )}

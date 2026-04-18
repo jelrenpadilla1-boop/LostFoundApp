@@ -42,24 +42,21 @@ export default function MyFoundItemsScreen({ navigation }) {
   const loadItems = async () => {
     try {
       const response = await foundItemsAPI.getMyItems();
+      // Backend returns ALL user's own items (including pending & rejected)
       const data = response.data?.data || response.data || [];
       
-      // FILTER: Exclude pending and rejected items
-      const filteredItems = data.filter(item => 
-        item.status !== 'pending' && item.status !== 'rejected'
-      );
+      // ✅ No filtering – show everything
+      setItems(data);
       
-      setItems(filteredItems);
-      
-      // Calculate stats based on filtered items
+      // Calculate stats based on ALL items
       setStats({
-        total: filteredItems.length,
-        pending: 0, // Don't show pending count since we're filtering them out
-        approved: filteredItems.filter(i => i.status === 'approved').length,
-        claimed: filteredItems.filter(i => i.status === 'claimed').length,
-        returned: filteredItems.filter(i => i.status === 'returned').length,
-        disposed: filteredItems.filter(i => i.status === 'disposed').length,
-        rejected: 0, // Don't show rejected count since we're filtering them out
+        total: data.length,
+        pending: data.filter(i => i.status === 'pending').length,
+        approved: data.filter(i => i.status === 'approved').length,
+        claimed: data.filter(i => i.status === 'claimed').length,
+        returned: data.filter(i => i.status === 'returned').length,
+        disposed: data.filter(i => i.status === 'disposed').length,
+        rejected: data.filter(i => i.status === 'rejected').length,
       });
     } catch (error) {
       console.error('Error loading my found items:', error);
@@ -92,9 +89,11 @@ export default function MyFoundItemsScreen({ navigation }) {
   const getStatusColor = (status) => {
     switch (status) {
       case 'approved': return '#16a34a';
-      case 'claimed': return '#3b82f6';
+      case 'pending':  return '#d97706';
+      case 'claimed':  return '#3b82f6';
       case 'returned': return '#8b5cf6';
       case 'disposed': return '#ef4444';
+      case 'rejected': return '#ef4444';
       default: return '#6b7280';
     }
   };
@@ -102,9 +101,11 @@ export default function MyFoundItemsScreen({ navigation }) {
   const getStatusIcon = (status) => {
     switch (status) {
       case 'approved': return 'check-circle';
-      case 'claimed': return 'user-check';
+      case 'pending':  return 'clock';
+      case 'claimed':  return 'user-check';
       case 'returned': return 'home';
       case 'disposed': return 'trash-2';
+      case 'rejected': return 'x-circle';
       default: return 'circle';
     }
   };
@@ -112,9 +113,11 @@ export default function MyFoundItemsScreen({ navigation }) {
   const getStatusLabel = (status) => {
     const labels = {
       approved: 'Approved',
-      claimed: 'Claimed',
+      pending:  'Pending',
+      claimed:  'Claimed',
       returned: 'Returned',
       disposed: 'Disposed',
+      rejected: 'Rejected',
     };
     return labels[status] || status || 'Unknown';
   };
@@ -170,7 +173,7 @@ export default function MyFoundItemsScreen({ navigation }) {
     );
   };
 
-  // Custom Header Component
+  // Header with back button and title
   const CustomHeader = () => {
     const theme = isDark ? darkTheme : lightTheme;
     return (
@@ -204,10 +207,9 @@ export default function MyFoundItemsScreen({ navigation }) {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       
-      {/* Custom Header */}
       <CustomHeader />
       
-      {/* Stats Cards - Only showing visible statuses */}
+      {/* Stats Cards – now includes pending & rejected */}
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false}
@@ -222,6 +224,16 @@ export default function MyFoundItemsScreen({ navigation }) {
           <Text style={[styles.statValue, { color: '#e50914' }]}>{stats.total}</Text>
           <Text style={[styles.statLabel, { color: theme.textMuted }]}>Total Items</Text>
         </View>
+        
+        {stats.pending > 0 && (
+          <View style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: 'rgba(217,119,6,0.1)' }]}>
+              <Feather name="clock" size={20} color="#d97706" />
+            </View>
+            <Text style={[styles.statValue, { color: '#d97706' }]}>{stats.pending}</Text>
+            <Text style={[styles.statLabel, { color: theme.textMuted }]}>Pending</Text>
+          </View>
+        )}
         
         {stats.approved > 0 && (
           <View style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -262,9 +274,18 @@ export default function MyFoundItemsScreen({ navigation }) {
             <Text style={[styles.statLabel, { color: theme.textMuted }]}>Disposed</Text>
           </View>
         )}
+        
+        {stats.rejected > 0 && (
+          <View style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: 'rgba(239,68,68,0.1)' }]}>
+              <Feather name="x-circle" size={20} color="#ef4444" />
+            </View>
+            <Text style={[styles.statValue, { color: '#ef4444' }]}>{stats.rejected}</Text>
+            <Text style={[styles.statLabel, { color: theme.textMuted }]}>Rejected</Text>
+          </View>
+        )}
       </ScrollView>
       
-      {/* Items List */}
       <FlatList
         data={items}
         keyExtractor={(item) => item.id.toString()}
@@ -279,10 +300,7 @@ export default function MyFoundItemsScreen({ navigation }) {
               <Feather name="inbox" size={64} color="#e50914" />
             </View>
             <Text style={[styles.emptyText, { color: theme.textMuted }]}>
-              No visible found items yet
-            </Text>
-            <Text style={[styles.emptySubText, { color: theme.textMuted }]}>
-              Items pending or rejected are not shown here
+              You haven't reported any found items yet
             </Text>
             <TouchableOpacity
               style={styles.emptyButton}
@@ -297,7 +315,6 @@ export default function MyFoundItemsScreen({ navigation }) {
         }
       />
       
-      {/* FAB */}
       <TouchableOpacity
         style={styles.fab}
         onPress={() => navigation.navigate('CreateItem', { type: 'found' })}
@@ -530,4 +547,4 @@ const getStyles = (isDark, theme) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+});                                                                                 

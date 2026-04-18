@@ -144,10 +144,7 @@ export default function RegisterScreen({ navigation }) {
             </TouchableOpacity>
 
             <View style={styles.navActions}>
-              <TouchableOpacity style={styles.themeToggle} activeOpacity={0.8} onPress={toggleTheme}>
-                <Feather name={isDark ? 'sun' : 'moon'} size={18} color="#e50914" />
-              </TouchableOpacity>
-
+              
               <TouchableOpacity
                 style={[styles.navSignIn, { borderColor: isDark ? '#333333' : '#e0e0e0' }]}
                 activeOpacity={0.8}

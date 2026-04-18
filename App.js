@@ -1,4 +1,4 @@
-// App.js - Updated navigation handling
+// App.js - Updated with Netflix-style splash screen
 import { NavigationContainer } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import { StatusBar } from 'expo-status-bar';
@@ -6,9 +6,10 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Platform, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { setNavigationRef } from './src/api/client';
+import SplashScreen from './src/components/SplashScreen'; // ← ADD THIS
 import { AuthProvider, useAuth } from './src/context/AuthContext';
-import { ThemeProvider } from './src/context/ThemeContext';
 import { SocketProvider } from './src/context/SocketContext';
+import { ThemeProvider } from './src/context/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { registerForPushNotifications } from './src/services/notificationService';
 import { getToken } from './src/utils/tokenStorage';
@@ -63,6 +64,7 @@ function AppContent() {
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showSplash, setShowSplash] = useState(true); // ← ADD THIS
 
   useEffect(() => {
     initializeApp();
@@ -118,6 +120,12 @@ export default function App() {
     }
   };
 
+  // Show Netflix-style splash screen first
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
+  // After splash, show loading or error or main content
   if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#faf9fe' }}>

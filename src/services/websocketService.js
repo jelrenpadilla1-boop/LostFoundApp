@@ -22,7 +22,7 @@ import Pusher from 'pusher-js/react-native';
 import { getToken } from '../utils/tokenStorage';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
-const API_HOST = '10.116.78.132';
+const API_HOST = '172.29.250.132';
 const API_PORT = 8092;
 const WS_PORT  = 8080;   // Laravel Reverb default port (change to match REVERB_PORT in .env)
 

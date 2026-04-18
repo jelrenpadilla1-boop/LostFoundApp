@@ -23,7 +23,7 @@ const Tab = createBottomTabNavigator();
 
 export default function MainTabNavigator() {
   const { isAdmin } = useAuth();
-  const { colors, isDark } = useTheme();
+  const { isDark } = useTheme();
   const {
     // User unread counts
     unreadMessages,
@@ -54,17 +54,13 @@ export default function MainTabNavigator() {
     clearUnreadAdminUsers,
   } = useSocket();
 
-  // Format badge count (show 99+ for large numbers)
   const formatBadgeCount = (count) => {
     if (!count || count === 0) return undefined;
-    if (count > 99) return '99+';
-    return count;
+    return count > 99 ? '99+' : count;
   };
 
-  // Calculate total badges for admin tabs
   const totalPendingItems = (pendingLostCount || 0) + (pendingFoundCount || 0);
 
-  // Theme colors matching Profile screen
   const theme = {
     background: isDark ? '#141414' : '#f8fafc',
     tabBar: isDark ? '#1a1a1a' : '#ffffff',
@@ -92,28 +88,38 @@ export default function MainTabNavigator() {
   const tabBarActiveTintColor = theme.red;
   const tabBarInactiveTintColor = isDark ? '#666688' : '#94a3b8';
 
-  // Custom Tab Bar Icon with badge (matching Profile screen's badge style)
+  // ✅ FIXED: Badge container with overflow visible
   const TabBarIcon = ({ focused, iconName, badgeCount }) => (
     <View style={styles.tabIconContainer}>
-      <View style={[
-        styles.iconWrapper,
-        focused && styles.iconWrapperActive,
-        { backgroundColor: focused ? (isDark ? 'rgba(229,9,20,0.15)' : '#fde8e8') : 'transparent' }
-      ]}>
-        <Feather 
-          name={iconName} 
-          size={22} 
-          color={focused ? tabBarActiveTintColor : tabBarInactiveTintColor} 
+      <View
+        style={[
+          styles.iconWrapper,
+          focused && styles.iconWrapperActive,
+          {
+            backgroundColor: focused
+              ? isDark
+                ? 'rgba(229,9,20,0.15)'
+                : '#fde8e8'
+              : 'transparent',
+          },
+        ]}
+      >
+        <Feather
+          name={iconName}
+          size={22}
+          color={focused ? tabBarActiveTintColor : tabBarInactiveTintColor}
         />
       </View>
       {badgeCount > 0 && (
-        <View style={[
-          styles.tabBadge, 
-          { 
-            backgroundColor: theme.red,
-            borderColor: isDark ? '#1a1a1a' : '#ffffff'
-          }
-        ]}>
+        <View
+          style={[
+            styles.tabBadge,
+            {
+              backgroundColor: theme.red,
+              borderColor: isDark ? '#1a1a1a' : '#ffffff',
+            },
+          ]}
+        >
           <Text style={styles.tabBadgeText}>
             {badgeCount > 99 ? '99+' : badgeCount}
           </Text>
@@ -122,7 +128,7 @@ export default function MainTabNavigator() {
     </View>
   );
 
-  // Admin Tab Configuration
+  // ---------- ADMIN TABS ----------
   if (isAdmin) {
     return (
       <Tab.Navigator
@@ -157,7 +163,7 @@ export default function MainTabNavigator() {
             }
 
             return (
-              <TabBarIcon 
+              <TabBarIcon
                 focused={focused}
                 iconName={iconName}
                 badgeCount={badgeCount}
@@ -171,7 +177,7 @@ export default function MainTabNavigator() {
           tabBarShowLabel: true,
           tabBarLabelStyle: [
             styles.tabLabel,
-            { color: isDark ? '#b3b3b3' : '#64748b' }
+            { color: isDark ? '#b3b3b3' : '#64748b' },
           ],
         })}
       >
@@ -207,7 +213,7 @@ export default function MainTabNavigator() {
     );
   }
 
-  // Regular User Tab Configuration
+  // ---------- USER TABS ----------
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -257,7 +263,7 @@ export default function MainTabNavigator() {
           }
 
           return (
-            <TabBarIcon 
+            <TabBarIcon
               focused={focused}
               iconName={iconName}
               badgeCount={badgeCount}
@@ -271,7 +277,7 @@ export default function MainTabNavigator() {
         tabBarShowLabel: true,
         tabBarLabelStyle: [
           styles.tabLabel,
-          { color: isDark ? '#b3b3b3' : '#64748b' }
+          { color: isDark ? '#b3b3b3' : '#64748b' },
         ],
       })}
     >
@@ -336,6 +342,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+    overflow: 'visible', // ✅ CRITICAL: allows badge to be visible outside the icon area
   },
   iconWrapper: {
     width: 44,

@@ -36,6 +36,11 @@ export default function CreateItemScreen({ route, navigation }) {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [gettingLocation, setGettingLocation] = useState(false);
   const [locationError, setLocationError] = useState(null);
+  const [isLocationManuallyEdited, setIsLocationManuallyEdited] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  
+  const locationFieldKey = type === 'lost' ? 'lost_location' : 'found_location';
+  
   const [formData, setFormData] = useState({
     item_name: '',
     description: '',
@@ -44,8 +49,8 @@ export default function CreateItemScreen({ route, navigation }) {
     photoUri: null,
     date_lost: new Date(),
     date_found: new Date(),
-    latitude: user?.latitude || '',
-    longitude: user?.longitude || '',
+    latitude: '',
+    longitude: '',
     lost_location: '',
     found_location: '',
   });
@@ -128,13 +133,37 @@ export default function CreateItemScreen({ route, navigation }) {
     }
   };
 
-  // FIXED: Improved location function with better error handling
+  // Geocode a typed address into coordinates
+  const geocodeLocation = async (address) => {
+    if (!address || !address.trim()) return;
+    
+    setIsGeocoding(true);
+    try {
+      const results = await Location.geocodeAsync(address);
+      if (results && results.length > 0) {
+        const { latitude, longitude } = results[0];
+        setFormData(prev => ({
+          ...prev,
+          latitude: latitude.toFixed(6),
+          longitude: longitude.toFixed(6),
+        }));
+        Alert.alert('Location Updated', `Coordinates set to ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+      } else {
+        Alert.alert('Geocoding Failed', 'Could not find coordinates for this address. Please check the location or use "Use My Location".');
+      }
+    } catch (error) {
+      console.error('Geocoding error:', error);
+      Alert.alert('Geocoding Error', 'Failed to convert address to coordinates. Please enter coordinates manually or use "Use My Location".');
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
   const getCurrentLocation = async () => {
     setGettingLocation(true);
     setLocationError(null);
     
     try {
-      // First, check and request permissions (this will also prompt the user)
       const { status } = await Location.requestForegroundPermissionsAsync();
       
       if (status !== 'granted') {
@@ -150,10 +179,9 @@ export default function CreateItemScreen({ route, navigation }) {
         return;
       }
 
-      // Now try to get the current position
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
-        timeout: 15000, // Increased timeout
+        timeout: 15000,
       });
       
       const lat = location.coords.latitude.toFixed(6);
@@ -165,53 +193,49 @@ export default function CreateItemScreen({ route, navigation }) {
         longitude: lng,
       }));
       
-      // Try reverse geocoding to get address
-      try {
-        const reverseGeocode = await Location.reverseGeocodeAsync({
-          latitude: parseFloat(lat),
-          longitude: parseFloat(lng),
-        });
-        
-        if (reverseGeocode && reverseGeocode.length > 0) {
-          const address = reverseGeocode[0];
-          const addressParts = [];
+      // Only auto-fill the location text field if the user hasn't manually typed anything
+      if (!isLocationManuallyEdited) {
+        try {
+          const reverseGeocode = await Location.reverseGeocodeAsync({
+            latitude: parseFloat(lat),
+            longitude: parseFloat(lng),
+          });
           
-          if (address.name) addressParts.push(address.name);
-          if (address.street) addressParts.push(address.street);
-          if (address.district) addressParts.push(address.district);
-          if (address.city) addressParts.push(address.city);
-          if (address.region) addressParts.push(address.region);
-          
-          const formattedAddress = addressParts.join(', ');
-          const locationField = type === 'lost' ? 'lost_location' : 'found_location';
-          
+          if (reverseGeocode && reverseGeocode.length > 0) {
+            const address = reverseGeocode[0];
+            const addressParts = [];
+            if (address.name) addressParts.push(address.name);
+            if (address.street) addressParts.push(address.street);
+            if (address.district) addressParts.push(address.district);
+            if (address.city) addressParts.push(address.city);
+            if (address.region) addressParts.push(address.region);
+            const formattedAddress = addressParts.join(', ') || `${lat}, ${lng}`;
+            
+            setFormData(prev => ({
+              ...prev,
+              [locationFieldKey]: formattedAddress,
+            }));
+          } else {
+            setFormData(prev => ({
+              ...prev,
+              [locationFieldKey]: `${lat}, ${lng}`,
+            }));
+          }
+        } catch (geoError) {
+          console.log('Reverse geocoding failed:', geoError);
           setFormData(prev => ({
             ...prev,
-            [locationField]: formattedAddress || `${lat}, ${lng}`,
-          }));
-        } else {
-          const locationField = type === 'lost' ? 'lost_location' : 'found_location';
-          setFormData(prev => ({
-            ...prev,
-            [locationField]: `${lat}, ${lng}`,
+            [locationFieldKey]: `${lat}, ${lng}`,
           }));
         }
-      } catch (geoError) {
-        console.log('Reverse geocoding failed:', geoError);
-        const locationField = type === 'lost' ? 'lost_location' : 'found_location';
-        setFormData(prev => ({
-          ...prev,
-          [locationField]: `${lat}, ${lng}`,
-        }));
+      } else {
+        Alert.alert('Location Updated', 'Coordinates have been updated. Your location text remains unchanged.');
       }
       
       Alert.alert('Success', 'Location retrieved successfully!');
     } catch (error) {
       console.error('Location error:', error);
-      
-      // Handle specific error cases
       let errorMessage = 'Unable to retrieve location.';
-      
       if (error.code === Location.LocationErrorCode.LocationUnavailable) {
         errorMessage = 'Location service is unavailable. Please check your device settings and try again.';
       } else if (error.code === Location.LocationErrorCode.Timeout) {
@@ -219,7 +243,6 @@ export default function CreateItemScreen({ route, navigation }) {
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
       setLocationError(errorMessage);
       Alert.alert('Location Error', errorMessage);
     } finally {
@@ -235,6 +258,7 @@ export default function CreateItemScreen({ route, navigation }) {
       lost_location: '',
       found_location: '',
     }));
+    setIsLocationManuallyEdited(false);
     setLocationError(null);
     Alert.alert('Info', 'Location fields cleared');
   };
@@ -434,7 +458,7 @@ export default function CreateItemScreen({ route, navigation }) {
                     </View>
                   </View>
 
-                  {/* Location Information (moved to left column) */}
+                  {/* Location Information */}
                   <View style={[styles.formSection, { borderBottomColor: theme.border }]}>
                     <View style={styles.sectionHeader}>
                       <Feather name="map-pin" size={16} color="#e50914" />
@@ -458,13 +482,26 @@ export default function CreateItemScreen({ route, navigation }) {
                         placeholderTextColor={theme.textMuted}
                         value={isLost ? formData.lost_location : formData.found_location}
                         onChangeText={(text) => {
+                          setIsLocationManuallyEdited(true);
                           if (isLost) {
                             setFormData(prev => ({ ...prev, lost_location: text }));
                           } else {
                             setFormData(prev => ({ ...prev, found_location: text }));
                           }
                         }}
+                        onBlur={() => {
+                          const address = isLost ? formData.lost_location : formData.found_location;
+                          if (address && !formData.latitude && !formData.longitude) {
+                            geocodeLocation(address);
+                          }
+                        }}
                       />
+                      {isGeocoding && (
+                        <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <ActivityIndicator size="small" color="#e50914" />
+                          <Text style={{ fontSize: 12, color: theme.textSecondary }}>Converting address to coordinates...</Text>
+                        </View>
+                      )}
                     </View>
 
                     <View style={styles.coordinatesRow}>
@@ -527,7 +564,7 @@ export default function CreateItemScreen({ route, navigation }) {
 
                 {/* Right Column */}
                 <View>
-                  {/* Date & Photo (moved to right column) */}
+                  {/* Date & Photo */}
                   <View style={[styles.formSection, { borderBottomColor: theme.border }]}>
                     <View style={styles.sectionHeader}>
                       <Feather name="calendar" size={16} color="#e50914" />

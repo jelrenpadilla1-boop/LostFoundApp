@@ -24,7 +24,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE_URL = 'http://10.116.78.132:8092';
+const API_BASE_URL = 'http://172.29.250.132:8092';
 
 export default function MessagesScreen({ navigation }) {
     const [conversations, setConversations] = useState([]);
@@ -328,12 +328,7 @@ export default function MessagesScreen({ navigation }) {
                             </Text>
                         </View>
                         
-                        <TouchableOpacity
-                            style={styles.themeToggle}
-                            onPress={toggleTheme}
-                        >
-                            <Feather name={isDark ? 'sun' : 'moon'} size={20} color="#e50914" />
-                        </TouchableOpacity>
+                       
                     </View>
                 </LinearGradient>
 

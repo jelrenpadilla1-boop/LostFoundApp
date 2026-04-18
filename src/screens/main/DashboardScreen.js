@@ -502,10 +502,38 @@ export default function DashboardScreen({ navigation }) {
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
           <SectionLabel label="MY STATS" />
           <View style={[styles.statsRow, { paddingHorizontal: ph }]}>
-            <StatCard icon="alert-circle" value={stats?.my_lost_items || 0} label="Lost" color={C.red} colorMuted={C.redMuted} onPress={() => navigation.navigate('Lost')} />
-            <StatCard icon="check-circle" value={stats?.my_found_items || 0} label="Found" color={C.green} colorMuted={C.greenMuted} onPress={() => navigation.navigate('Found')} />
-            <StatCard icon="git-branch" value={highMatches.length} label="Matches" color={C.blue} colorMuted={C.blueMuted} onPress={() => navigation.navigate('Matches')} />
-            <StatCard icon="award" value={totalRecovered} label="Recovered" color={C.amber} colorMuted={C.amberMuted} onPress={() => navigation.navigate('Matches', { status: 'confirmed' })} />
+            <StatCard 
+              icon="alert-circle" 
+              value={stats?.my_lost_items || 0} 
+              label="Lost" 
+              color={C.red} 
+              colorMuted={C.redMuted} 
+              onPress={() => navigation.navigate('MyLostItems')} 
+            />
+            <StatCard 
+              icon="check-circle" 
+              value={stats?.my_found_items || 0} 
+              label="Found" 
+              color={C.green} 
+              colorMuted={C.greenMuted} 
+              onPress={() => navigation.navigate('MyFoundItems')} 
+            />
+            <StatCard 
+              icon="git-branch" 
+              value={highMatches.length} 
+              label="Matches" 
+              color={C.blue} 
+              colorMuted={C.blueMuted} 
+              onPress={() => navigation.navigate('Matches')} 
+            />
+            <StatCard 
+              icon="award" 
+              value={totalRecovered} 
+              label="Recovered" 
+              color={C.amber} 
+              colorMuted={C.amberMuted} 
+              onPress={() => navigation.navigate('Matches', { status: 'confirmed' })} 
+            />
           </View>
         </Animated.View>
 
