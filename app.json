@@ -42,7 +42,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "extra": {
-      "apiUrl": "172.29.250.132",
+      "apiUrl": "192.168.1.2",
       "eas": {
         "projectId": "28cffc51-a616-4148-bbf2-62661da7e099"
       }

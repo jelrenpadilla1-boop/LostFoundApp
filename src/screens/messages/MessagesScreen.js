@@ -24,7 +24,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE_URL = 'http://172.29.250.132:8092';
+const API_BASE_URL = 'http://192.168.1.2:8092';
 
 export default function MessagesScreen({ navigation }) {
     const [conversations, setConversations] = useState([]);
@@ -36,7 +36,7 @@ export default function MessagesScreen({ navigation }) {
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const { user } = useAuth();
-    const { addNotificationListener } = useSocket();
+    const { addNotificationListener, refreshUnreadMessages } = useSocket();
     const { isDark, toggleTheme } = useTheme();
 
     // Refresh conversation list when a new message or match notification arrives
@@ -44,17 +44,19 @@ export default function MessagesScreen({ navigation }) {
         const remove = addNotificationListener((data) => {
             if (data.type === 'message' || data.type === 'match') {
                 loadConversations();
+                refreshUnreadMessages();
             }
         });
         return remove;
-    }, [addNotificationListener]);
+    }, [addNotificationListener, refreshUnreadMessages]);
 
     useFocusEffect(
         useCallback(() => {
             loadConversations();
+            refreshUnreadMessages();
             loadUsers();
             return () => {};
-        }, [])
+        }, [refreshUnreadMessages])
     );
 
     const loadConversations = async () => {

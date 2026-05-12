@@ -27,7 +27,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE_URL = 'http://172.29.250.132:8092';
+const API_BASE_URL = 'http://192.168.1.2:8092';
 
 export default function ChatScreen({ route, navigation }) {
     // Handle both conversationId and userId parameters
@@ -48,7 +48,7 @@ export default function ChatScreen({ route, navigation }) {
     const lastMessageIdRef = useRef(0);
     const inputRef = useRef(null);
     const { user, logout } = useAuth();
-    const { subscribeToConversation } = useSocket();
+    const { connected, subscribeToConversation, refreshUnreadMessages } = useSocket();
     const { isDark } = useTheme();
 
     useFocusEffect(
@@ -58,7 +58,10 @@ export default function ChatScreen({ route, navigation }) {
             // Start real-time subscription if we have a conversation ID
             if (currentConversationId) {
                 const sub = subscribeToConversation(currentConversationId, {
-                    onNewMessage: ({ message }) => {
+                    onNewMessage: (payload) => {
+                        const message = payload?.message || payload?.data?.message || payload?.data || payload;
+                        if (!message?.id) return;
+
                         setMessages(prev => {
                             // Avoid duplicates
                             if (prev.some(m => m.id === message.id)) return prev;
@@ -68,7 +71,9 @@ export default function ChatScreen({ route, navigation }) {
                             lastMessageIdRef.current = message.id;
                         }
                         if (message.user_id !== user?.id) {
-                            messagesAPI.markAsRead(currentConversationId).catch(() => {});
+                            messagesAPI.markAsRead(currentConversationId)
+                                .then(refreshUnreadMessages)
+                                .catch(() => {});
                         }
                         setTimeout(() => {
                             flatListRef.current?.scrollToEnd({ animated: true });
@@ -82,7 +87,7 @@ export default function ChatScreen({ route, navigation }) {
                 subscriptionRef.current?.unsubscribe();
                 subscriptionRef.current = null;
             };
-        }, [currentConversationId, userId])
+        }, [connected, currentConversationId, userId, refreshUnreadMessages])
     );
 
     const loadConversation = async () => {
@@ -173,6 +178,7 @@ export default function ChatScreen({ route, navigation }) {
             if (currentConversationId) {
                 try {
                     await messagesAPI.markAsRead(currentConversationId);
+                    refreshUnreadMessages();
                 } catch (error) {
                     console.log('Error marking as read:', error);
                 }

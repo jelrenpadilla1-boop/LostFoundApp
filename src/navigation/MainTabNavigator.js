@@ -43,7 +43,6 @@ export default function MainTabNavigator() {
     pendingMatchesCount,
     pendingUsersCount,
     // Clear functions
-    clearUnreadMessages,
     clearUnreadMatches,
     clearUnreadLost,
     clearUnreadFound,
@@ -52,22 +51,19 @@ export default function MainTabNavigator() {
     clearUnreadMyFound,
     clearUnreadAdminMatches,
     clearUnreadAdminUsers,
+    refreshUnreadMessages,
   } = useSocket();
-
-  const formatBadgeCount = (count) => {
-    if (!count || count === 0) return undefined;
-    return count > 99 ? '99+' : count;
-  };
 
   const totalPendingItems = (pendingLostCount || 0) + (pendingFoundCount || 0);
 
   const theme = {
     background: isDark ? '#141414' : '#f8fafc',
-    tabBar: isDark ? '#1a1a1a' : '#ffffff',
-    tabBarBorder: isDark ? '#333333' : '#edeef5',
+    tabBar: isDark ? '#18181b' : '#ffffff',
+    tabBarBorder: isDark ? '#2f3037' : '#e6e8ef',
     text: isDark ? '#ffffff' : '#0f172a',
-    textMuted: isDark ? '#b3b3b3' : '#64748b',
+    textMuted: isDark ? '#9ca3af' : '#667085',
     red: '#e50914',
+    redMuted: isDark ? 'rgba(229,9,20,0.16)' : '#fff1f2',
     cardBorder: isDark ? '#333333' : '#edeef5',
   };
 
@@ -75,14 +71,14 @@ export default function MainTabNavigator() {
     backgroundColor: theme.tabBar,
     borderTopColor: theme.tabBarBorder,
     borderTopWidth: 1,
-    height: Platform.OS === 'ios' ? 85 : 65,
-    paddingBottom: Platform.OS === 'ios' ? 25 : 10,
-    paddingTop: 8,
+    height: Platform.OS === 'ios' ? 88 : 72,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 12,
+    paddingTop: 7,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOpacity: isDark ? 0.35 : 0.08,
+    shadowRadius: 12,
+    elevation: 8,
   };
 
   const tabBarActiveTintColor = theme.red;
@@ -91,16 +87,20 @@ export default function MainTabNavigator() {
   // ✅ FIXED: Badge container with overflow visible
   const TabBarIcon = ({ focused, iconName, badgeCount }) => (
     <View style={styles.tabIconContainer}>
+      {focused && (
+        <View
+          style={[
+            styles.activeIndicator,
+            { backgroundColor: theme.red },
+          ]}
+        />
+      )}
       <View
         style={[
           styles.iconWrapper,
-          focused && styles.iconWrapperActive,
           {
-            backgroundColor: focused
-              ? isDark
-                ? 'rgba(229,9,20,0.15)'
-                : '#fde8e8'
-              : 'transparent',
+            backgroundColor: focused ? theme.redMuted : 'transparent',
+            borderColor: focused ? theme.red : 'transparent',
           },
         ]}
       >
@@ -175,10 +175,8 @@ export default function MainTabNavigator() {
           tabBarStyle,
           headerShown: false,
           tabBarShowLabel: true,
-          tabBarLabelStyle: [
-            styles.tabLabel,
-            { color: isDark ? '#b3b3b3' : '#64748b' },
-          ],
+          tabBarLabelStyle: styles.tabLabel,
+          tabBarItemStyle: styles.tabItem,
         })}
       >
         <Tab.Screen
@@ -252,7 +250,7 @@ export default function MainTabNavigator() {
               break;
             case 'Messages':
               iconName = 'message-circle';
-              badgeCount = unreadMessages;
+              badgeCount = unreadMessages || 0;
               break;
             case 'Profile':
               iconName = 'user';
@@ -275,10 +273,8 @@ export default function MainTabNavigator() {
         tabBarStyle,
         headerShown: false,
         tabBarShowLabel: true,
-        tabBarLabelStyle: [
-          styles.tabLabel,
-          { color: isDark ? '#b3b3b3' : '#64748b' },
-        ],
+        tabBarLabelStyle: styles.tabLabel,
+        tabBarItemStyle: styles.tabItem,
       })}
     >
       <Tab.Screen
@@ -326,7 +322,7 @@ export default function MainTabNavigator() {
         name="Messages"
         component={MessagesScreen}
         options={{ title: 'Chat' }}
-        listeners={{ focus: clearUnreadMessages }}
+        listeners={{ focus: refreshUnreadMessages }}
       />
       <Tab.Screen
         name="Profile"
@@ -342,22 +338,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    overflow: 'visible', // ✅ CRITICAL: allows badge to be visible outside the icon area
+    width: 46,
+    height: 38,
+    overflow: 'visible',
+  },
+  activeIndicator: {
+    position: 'absolute',
+    top: 1,
+    width: 18,
+    height: 3,
+    borderRadius: 2,
   },
   iconWrapper: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 32,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  iconWrapperActive: {
-    transform: [{ scale: 1 }],
+    borderWidth: 1,
   },
   tabBadge: {
     position: 'absolute',
-    top: -2,
-    right: -6,
+    top: 0,
+    right: 2,
     minWidth: 18,
     height: 18,
     borderRadius: 9,
@@ -379,10 +382,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tabLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 2,
-    letterSpacing: 0.3,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: -2,
+    letterSpacing: 0,
     textTransform: 'none',
+  },
+  tabItem: {
+    paddingVertical: 2,
+    overflow: 'visible',
   },
 });

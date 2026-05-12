@@ -33,7 +33,7 @@ export default function ItemCard({ item, type, onPress }) {
   const imageUrl = item.photo 
     ? item.photo.startsWith('http') 
       ? item.photo 
-      : `http://172.29.250.132:8000/storage/${item.photo}`
+      : `http://192.168.1.2:8000/storage/${item.photo}`
     : null;
 
   return (

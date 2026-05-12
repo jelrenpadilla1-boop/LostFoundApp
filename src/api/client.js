@@ -4,7 +4,7 @@ import { Alert } from 'react-native';
 import { getToken, removeToken, removeUser } from '../utils/tokenStorage';
 
 // Get your IP address from your computer
-const API_BASE_URL = 'http://172.29.250.132:8092/api';
+const API_BASE_URL = 'http://192.168.1.2:8092/api';
 
 // Create a navigation reference to use outside of React components
 let navigationRef = null;
@@ -132,6 +132,10 @@ api.interceptors.response.use(
       '/users/search',
       '/profile/stats',
       '/notifications',
+      '/messages/unread-count',
+      '/matches/unread-count',
+      '/pending-count',
+      '/new-count',
       '/dashboard/stats',
       '/dashboard/recent-items'
     ];
@@ -160,7 +164,8 @@ api.interceptors.response.use(
             message: 'Unauthenticated',
             data: originalRequest?.url?.includes('/users') ? [] : null,
             users: [],
-            conversations: []
+            conversations: [],
+            count: 0
           } 
         });
       }

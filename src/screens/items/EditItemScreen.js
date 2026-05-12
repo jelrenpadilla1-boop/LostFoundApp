@@ -25,7 +25,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
-const API_BASE_URL = 'http://10.116.78.132:8092';
+const API_BASE_URL = 'http://192.168.1.2:8092';
 
 export default function EditItemScreen({ route, navigation }) {
   const { type, id } = route.params;

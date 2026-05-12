@@ -22,7 +22,7 @@ import Pusher from 'pusher-js/react-native';
 import { getToken } from '../utils/tokenStorage';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
-const API_HOST = '172.29.250.132';
+const API_HOST = '192.168.1.2';
 const API_PORT = 8092;
 const WS_PORT  = 8080;   // Laravel Reverb default port (change to match REVERB_PORT in .env)
 
@@ -38,7 +38,7 @@ export const WS_CONFIG = {
   cluster: 'mt1', // required by pusher-js but ignored when wsHost is set
 
   // Laravel broadcasting auth endpoint
-  authEndpoint: `http://${API_HOST}:${API_PORT}/broadcasting/auth`,
+  authEndpoint: `http://${API_HOST}:${API_PORT}/api/broadcasting/auth`,
 
   disableStats: true,
   activityTimeout: 120000,
@@ -74,6 +74,7 @@ class WebSocketService {
     const token = await getToken();
     if (!token) {
       console.log('WS: no auth token, skipping');
+      this._connecting = false;
       return false;
     }
 
@@ -81,6 +82,13 @@ class WebSocketService {
       try {
         const options = {
           auth: {
+            endpoint: WS_CONFIG.authEndpoint,
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/json',
+            },
+          },
+          channelAuthorization: {
             endpoint: WS_CONFIG.authEndpoint,
             headers: {
               Authorization: `Bearer ${token}`,
@@ -187,13 +195,24 @@ class WebSocketService {
 
     const onMessage = (data) => callbacks.onNewMessage?.(data);
     const onTyping  = (data) => callbacks.onTyping?.(data);
+    const messageEvents = [
+      'MessageSent',
+      '.MessageSent',
+      'App\\Events\\MessageSent',
+      'App\\Events\\Messages\\MessageSent',
+    ];
+    const typingEvents = [
+      'UserTyping',
+      '.UserTyping',
+      'App\\Events\\UserTyping',
+    ];
 
-    channel.bind('MessageSent', onMessage);
-    channel.bind('UserTyping', onTyping);
+    messageEvents.forEach(event => channel.bind(event, onMessage));
+    typingEvents.forEach(event => channel.bind(event, onTyping));
 
     return () => {
-      channel.unbind('MessageSent', onMessage);
-      channel.unbind('UserTyping', onTyping);
+      messageEvents.forEach(event => channel.unbind(event, onMessage));
+      typingEvents.forEach(event => channel.unbind(event, onTyping));
       this._unsubscribe(channelName);
     };
   }
@@ -216,15 +235,29 @@ class WebSocketService {
     const onNotification        = (data) => callbacks.onNotification?.(data);
     const onMatch               = (data) => callbacks.onMatch?.(data);
     const onMessageNotification = (data) => callbacks.onMessageNotification?.(data);
+    const notificationEvents = [
+      'Illuminate\\Notifications\\Events\\BroadcastNotificationCreated',
+      '.Illuminate\\Notifications\\Events\\BroadcastNotificationCreated',
+    ];
+    const matchEvents = [
+      'NewMatch',
+      '.NewMatch',
+      'App\\Events\\NewMatch',
+    ];
+    const messageNotificationEvents = [
+      'NewMessageNotification',
+      '.NewMessageNotification',
+      'App\\Events\\NewMessageNotification',
+    ];
 
-    channel.bind('Illuminate\\Notifications\\Events\\BroadcastNotificationCreated', onNotification);
-    channel.bind('NewMatch', onMatch);
-    channel.bind('NewMessageNotification', onMessageNotification);
+    notificationEvents.forEach(event => channel.bind(event, onNotification));
+    matchEvents.forEach(event => channel.bind(event, onMatch));
+    messageNotificationEvents.forEach(event => channel.bind(event, onMessageNotification));
 
     return () => {
-      channel.unbind('Illuminate\\Notifications\\Events\\BroadcastNotificationCreated', onNotification);
-      channel.unbind('NewMatch', onMatch);
-      channel.unbind('NewMessageNotification', onMessageNotification);
+      notificationEvents.forEach(event => channel.unbind(event, onNotification));
+      matchEvents.forEach(event => channel.unbind(event, onMatch));
+      messageNotificationEvents.forEach(event => channel.unbind(event, onMessageNotification));
       this._unsubscribe(channelName);
     };
   }

@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 
-const API_BASE_URL = 'http://10.116.78.132:8092';
+const API_BASE_URL = 'http://192.168.1.2:8092';
 
 export default function ItemCard({ item, type, onPress }) {
   

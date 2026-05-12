@@ -1,6 +1,8 @@
 // src/context/SocketContext.js
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
+import api from '../api/client';
+import { messagesAPI } from '../api/messages';
 import { scheduleLocalNotification } from '../services/notificationService';
 import wsService from '../services/websocketService';
 import { getToken } from '../utils/tokenStorage';
@@ -10,7 +12,29 @@ const SocketContext = createContext();
 
 export const useSocket = () => useContext(SocketContext);
 
-const API_BASE_URL = 'http://172.29.250.132:8092/api';
+const API_BASE_URL = 'http://192.168.1.2:8092/api';
+
+const readCount = (data) => {
+  const payload = data?.data || {};
+  const count =
+    data?.count ??
+    data?.unread_count ??
+    data?.unreadCount ??
+    data?.unread_messages ??
+    data?.unreadMessages ??
+    data?.total ??
+    payload?.count ??
+    payload?.unread_count ??
+    payload?.unreadCount ??
+    payload?.unread_messages ??
+    payload?.unreadMessages ??
+    payload?.total ??
+    0;
+  const parsed = Number(count);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const readNotificationType = (data) => data?.data?.type || data?.type;
 
 export const SocketProvider = ({ children }) => {
   const { user, isAdmin } = useAuth();
@@ -39,78 +63,58 @@ export const SocketProvider = ({ children }) => {
   const notificationListeners = useRef([]);
   const appState = useRef(AppState.currentState);
 
+  const refreshUnreadMessages = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const response = await messagesAPI.getUnreadCount();
+      setUnreadMessages(readCount(response.data));
+    } catch (error) {
+      console.error('Error refreshing unread messages:', error);
+    }
+  }, [user?.id]);
+
+  const loadBadgeCount = useCallback(async (url, onCount) => {
+    try {
+      const response = await api.get(url);
+      onCount(readCount(response.data));
+    } catch (error) {
+      console.log(`Unable to load badge count for ${url}:`, error.response?.status || error.message);
+    }
+  }, []);
+
   // ── Load initial unread counts from API ─────────────────────────────────
   const loadInitialUnreadCounts = useCallback(async () => {
     if (!user?.id) return;
 
     try {
-      const token = await getToken();
-      if (!token) return;
+      await refreshUnreadMessages();
+      await loadBadgeCount('/matches/unread-count', setUnreadMatches);
 
-      // User: Unread messages count
-      const messagesRes = await fetch(`${API_BASE_URL}/messages/unread-count`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const messagesData = await messagesRes.json();
-      if (messagesData.success) {
-        setUnreadMessages(messagesData.count || 0);
-      }
-
-      // User: Unread matches count
-      const matchesRes = await fetch(`${API_BASE_URL}/matches/unread-count`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const matchesData = await matchesRes.json();
-      if (matchesData.success) {
-        setUnreadMatches(matchesData.count || 0);
-      }
-
-      // Admin: Pending counts
       if (isAdmin) {
-        // Pending lost items
-        const lostRes = await fetch(`${API_BASE_URL}/admin/lost-items/pending-count`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const lostData = await lostRes.json();
-        if (lostData.success) {
-          setPendingLostCount(lostData.count || 0);
-          setUnreadLost(lostData.count || 0);
-        }
-
-        // Pending found items
-        const foundRes = await fetch(`${API_BASE_URL}/admin/found-items/pending-count`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const foundData = await foundRes.json();
-        if (foundData.success) {
-          setPendingFoundCount(foundData.count || 0);
-          setUnreadFound(foundData.count || 0);
-        }
-
-        // Pending matches
-        const pendingMatchesRes = await fetch(`${API_BASE_URL}/admin/matches/pending-count`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const pendingMatchesData = await pendingMatchesRes.json();
-        if (pendingMatchesData.success) {
-          setPendingMatchesCount(pendingMatchesData.count || 0);
-          setUnreadAdminMatches(pendingMatchesData.count || 0);
-        }
-
-        // New users (last 7 days)
-        const usersRes = await fetch(`${API_BASE_URL}/admin/users/new-count`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const usersData = await usersRes.json();
-        if (usersData.success) {
-          setPendingUsersCount(usersData.count || 0);
-          setUnreadAdminUsers(usersData.count || 0);
-        }
+        await Promise.all([
+          loadBadgeCount('/admin/lost-items/pending-count', (count) => {
+            setPendingLostCount(count);
+            setUnreadLost(count);
+          }),
+          loadBadgeCount('/admin/found-items/pending-count', (count) => {
+            setPendingFoundCount(count);
+            setUnreadFound(count);
+          }),
+          loadBadgeCount('/admin/matches/pending-count', (count) => {
+            setPendingMatchesCount(count);
+            setUnreadAdminMatches(count);
+          }),
+          loadBadgeCount('/admin/users/new-count', (count) => {
+            setPendingUsersCount(count);
+            setUnreadAdminUsers(count);
+          }),
+        ]);
       }
     } catch (error) {
       console.error('Error loading initial unread counts:', error);
     }
-  }, [user?.id, isAdmin]);
+  }, [user?.id, isAdmin, refreshUnreadMessages, loadBadgeCount]);
 
   // ── Connect / disconnect when auth changes ─────────────────────────────────
 
@@ -188,18 +192,26 @@ export const SocketProvider = ({ children }) => {
     userChannelUnsubRef.current?.();
     userChannelUnsubRef.current = wsService.subscribeToUserChannel(userId, {
       onNotification: (data) => {
-        notifyListeners(data);
+        const notificationType = readNotificationType(data);
+        const notification = notificationType ? { ...data, type: notificationType } : data;
+        notifyListeners(notification);
         
-        if (data.type === 'lost') {
+        if (notificationType === 'lost') {
           if (isAdmin) {
             setPendingLostCount(c => c + 1);
             setUnreadLost(c => c + 1);
           }
-        } else if (data.type === 'found') {
+        } else if (notificationType === 'found') {
           if (isAdmin) {
             setPendingFoundCount(c => c + 1);
             setUnreadFound(c => c + 1);
           }
+        } else if (notificationType === 'message') {
+          const messageCount = readCount(data);
+          if (messageCount > 0) {
+            setUnreadMessages(c => Math.max(c, messageCount));
+          }
+          refreshUnreadMessages();
         }
         
         setUnreadNotifications(c => c + 1);
@@ -232,7 +244,7 @@ export const SocketProvider = ({ children }) => {
       
       onMessageNotification: (data) => {
         notifyListeners({ ...data, type: 'message' });
-        setUnreadMessages(c => c + 1);
+        setUnreadMessages(c => Math.max(c + 1, readCount(data)));
         setUnreadNotifications(c => c + 1);
         
         scheduleLocalNotification(
@@ -297,7 +309,15 @@ export const SocketProvider = ({ children }) => {
         });
         if (res.ok) {
           const data = await res.json();
-          (data.notifications || []).forEach(n => notifyListeners(n));
+          const notifications = data.notifications || [];
+          notifications.forEach(n => {
+            const notificationType = readNotificationType(n);
+            notifyListeners(notificationType ? { ...n, type: notificationType } : n);
+          });
+
+          if (notifications.some(n => readNotificationType(n) === 'message')) {
+            refreshUnreadMessages();
+          }
         }
       } catch {}
     }, 10000);
@@ -402,6 +422,7 @@ export const SocketProvider = ({ children }) => {
       // Utility functions
       subscribeToConversation,
       addNotificationListener,
+      refreshUnreadMessages,
     }}>
       {children}
     </SocketContext.Provider>

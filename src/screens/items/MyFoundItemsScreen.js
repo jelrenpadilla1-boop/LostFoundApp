@@ -21,7 +21,7 @@ import { foundItemsAPI } from '../../api/items';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE_URL = 'http://10.116.78.132:8092';
+const API_BASE_URL = 'http://192.168.1.2:8092';
 
 export default function MyFoundItemsScreen({ navigation }) {
   const { user } = useAuth();

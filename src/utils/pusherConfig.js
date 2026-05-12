@@ -1,14 +1,14 @@
 // src/utils/pusherConfig.js
 export const getPusherConfig = () => {
   // Get your computer's IP - replace with actual IP
-  const YOUR_COMPUTER_IP = '172.29.250.132';
+  const YOUR_COMPUTER_IP = '192.168.1.2';
   
   // For development with Expo Go
   if (__DEV__) {
     return {
       key: '9d07def6364aafd87b17', // Get from .env or config
-      cluster: 'ap1', // e.g., 'mt1'
-      authEndpoint: `http://${YOUR_COMPUTER_IP}:8000/broadcasting/auth`,
+      cluster: 'mt1', // required by pusher-js, ignored for local Reverb hosts
+      authEndpoint: `http://${YOUR_COMPUTER_IP}:8092/api/broadcasting/auth`,
       // Disable stats to avoid additional connections
       enableStats: false,
     };
@@ -17,8 +17,8 @@ export const getPusherConfig = () => {
   // Production
   return {
     key: '9d07def6364aafd87b17',
-    cluster: 'ap1',
-    authEndpoint: 'http://172.29.250.132:8092/api/broadcasting/auth',
+    cluster: 'mt1',
+    authEndpoint: 'http://192.168.1.2:8092/api/broadcasting/auth',
     enableStats: true,
   };
 };
