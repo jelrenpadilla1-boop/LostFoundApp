@@ -82,8 +82,30 @@ async function savePushToken(token) {
   }
 }
 
+async function ensureLocalNotificationPermission() {
+  if (Platform.OS === 'web') return false;
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'Default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#e50914',
+    });
+  }
+
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  if (existingStatus === 'granted') return true;
+
+  const { status } = await Notifications.requestPermissionsAsync();
+  return status === 'granted';
+}
+
 export async function scheduleLocalNotification(title, body, data = {}, seconds = 1) {
   try {
+    const allowed = await ensureLocalNotificationPermission();
+    if (!allowed) return;
+
     await Notifications.scheduleNotificationAsync({
       content: { title, body, data, sound: true },
       trigger: { seconds },
@@ -96,6 +118,9 @@ export async function scheduleLocalNotification(title, body, data = {}, seconds 
 // Fires a notification immediately (no delay) — used by WebSocket events.
 export async function showLocalNotification(title, body, data = {}) {
   try {
+    const allowed = await ensureLocalNotificationPermission();
+    if (!allowed) return;
+
     await Notifications.scheduleNotificationAsync({
       content: { title, body, data, sound: true },
       trigger: null, // null = show immediately

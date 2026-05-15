@@ -21,11 +21,20 @@ import api from '../../api/client';
 import { matchesAPI } from '../../api/matches';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
 import { useTheme } from '../../context/ThemeContext';
 
 export default function DashboardScreen({ navigation }) {
   const { user, isAdmin, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
+  const {
+    unreadMessages,
+    unreadMatches,
+    unreadNotifications,
+    unreadAdminMatches,
+    pendingMatchesCount,
+    clearUnreadNotifications,
+  } = useSocket();
   const { width } = useWindowDimensions();
 
   const [stats, setStats] = useState(null);
@@ -215,6 +224,17 @@ export default function DashboardScreen({ navigation }) {
   };
 
   const totalRecovered = (stats?.my_lost_recovered || 0) + (stats?.my_found_claimed || 0);
+  const notificationBadgeCount = Math.max(
+    0,
+    (unreadNotifications || 0) +
+      (unreadMessages || 0) +
+      (isAdmin ? Math.max(unreadAdminMatches || 0, pendingMatchesCount || 0) : (unreadMatches || 0))
+  );
+
+  const openNotifications = () => {
+    clearUnreadNotifications();
+    navigation.navigate('Notifications');
+  };
 
   // ─── Color tokens ────────────────────────────────────────────────────────────
   const C = {
@@ -296,6 +316,23 @@ export default function DashboardScreen({ navigation }) {
     </View>
   );
 
+  const NotificationButton = () => (
+    <TouchableOpacity
+      style={[styles.iconBtn, { backgroundColor: C.surface, borderColor: C.border }]}
+      onPress={openNotifications}
+      activeOpacity={0.8}
+    >
+      <Feather name="bell" size={17} color={notificationBadgeCount > 0 ? C.red : C.textMuted} />
+      {notificationBadgeCount > 0 && (
+        <View style={[styles.notificationBadge, { backgroundColor: C.red, borderColor: C.surface }]}>
+          <Text style={styles.notificationBadgeText}>
+            {notificationBadgeCount > 99 ? '99+' : notificationBadgeCount}
+          </Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+
   const ListCard = ({ title, accent, items, emptyMsg, renderItem, onViewAll }) => (
     <View style={[styles.listCard, { backgroundColor: C.surface, borderColor: C.border }]}>
       <View style={[styles.listCardHeader, { borderBottomColor: C.border }]}>
@@ -332,6 +369,7 @@ export default function DashboardScreen({ navigation }) {
                 <Text style={[styles.headerTitle, { color: C.text }]}>Dashboard</Text>
               </View>
               <View style={styles.headerRight}>
+                <NotificationButton />
                 <TouchableOpacity style={[styles.iconBtn, { backgroundColor: C.surface, borderColor: C.border }]} onPress={toggleTheme}>
                   <Feather name={isDark ? 'sun' : 'moon'} size={17} color={C.textMuted} />
                 </TouchableOpacity>
@@ -488,6 +526,7 @@ export default function DashboardScreen({ navigation }) {
               <Text style={[styles.headerTitle, { color: C.text }]}>{user?.name?.split(' ')[0]}</Text>
             </View>
             <View style={styles.headerRight}>
+              <NotificationButton />
               <TouchableOpacity style={[styles.iconBtn, { backgroundColor: C.surface, borderColor: C.border }]} onPress={toggleTheme}>
                 <Feather name={isDark ? 'sun' : 'moon'} size={17} color={C.textMuted} />
               </TouchableOpacity>
@@ -730,6 +769,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+    lineHeight: 12,
+    textAlign: 'center',
   },
 
   // Greeting strip (admin)

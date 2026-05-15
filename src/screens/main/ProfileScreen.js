@@ -24,7 +24,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
-const API_BASE_URL = 'http://192.168.1.2:8092';
+const API_BASE_URL = 'http://192.168.1.5:8092';
 
 export default function ProfileScreen({ navigation }) {
   const { user, logout, isAdmin, updateUser } = useAuth();
@@ -121,7 +121,7 @@ export default function ProfileScreen({ navigation }) {
 
     // Build the URL correctly
     // The photo path from backend is like: "profile-photos/filename.jpg"
-    // Full URL should be: http://192.168.1.2:8092/storage/profile-photos/filename.jpg
+    // Full URL should be: http://192.168.1.5:8092/storage/profile-photos/filename.jpg
     return `${API_BASE_URL}/storage/${cleanPath}`;
   };
 

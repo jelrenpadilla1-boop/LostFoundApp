@@ -27,7 +27,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE_URL = 'http://192.168.1.2:8092';
+const API_BASE_URL = 'http://192.168.1.5:8092';
 
 export default function ChatScreen({ route, navigation }) {
     // Handle both conversationId and userId parameters

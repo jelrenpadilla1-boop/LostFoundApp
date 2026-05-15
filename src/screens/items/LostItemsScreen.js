@@ -23,7 +23,7 @@ import { lostItemsAPI } from '../../api/items';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
-const API_BASE_URL = 'http://192.168.1.2:8092';
+const API_BASE_URL = 'http://192.168.1.5:8092';
 
 export default function LostItemsScreen({ navigation }) {
   const { width } = useWindowDimensions();

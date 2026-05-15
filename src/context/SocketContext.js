@@ -12,7 +12,7 @@ const SocketContext = createContext();
 
 export const useSocket = () => useContext(SocketContext);
 
-const API_BASE_URL = 'http://192.168.1.2:8092/api';
+const API_BASE_URL = 'http://192.168.1.5:8092/api';
 
 const readCount = (data) => {
   const payload = data?.data || {};
@@ -60,15 +60,38 @@ export const SocketProvider = ({ children }) => {
 
   const userChannelUnsubRef = useRef(null);
   const notifPollRef = useRef(null);
+  const badgePollRef = useRef(null);
   const notificationListeners = useRef([]);
   const appState = useRef(AppState.currentState);
+  const countsLoadedRef = useRef(false);
+  const previousUnreadMessagesRef = useRef(0);
+  const previousUnreadMatchesRef = useRef(0);
 
-  const refreshUnreadMessages = useCallback(async () => {
+  const refreshUnreadMessages = useCallback(async (options = {}) => {
     if (!user?.id) return;
 
     try {
       const response = await messagesAPI.getUnreadCount();
-      setUnreadMessages(readCount(response.data));
+      const nextCount = readCount(response.data);
+      const previousCount = previousUnreadMessagesRef.current;
+
+      setUnreadMessages(nextCount);
+      previousUnreadMessagesRef.current = nextCount;
+
+      if (options.notifyOnIncrease && countsLoadedRef.current && nextCount > previousCount) {
+        setUnreadNotifications(c => c + (nextCount - previousCount));
+        notifyListeners({
+          type: 'message',
+          title: 'New message',
+          body: 'You have a new unread message',
+          count: nextCount,
+        });
+        scheduleLocalNotification(
+          'New message',
+          'You have a new unread message',
+          { type: 'message', count: nextCount }
+        );
+      }
     } catch (error) {
       console.error('Error refreshing unread messages:', error);
     }
@@ -89,7 +112,11 @@ export const SocketProvider = ({ children }) => {
 
     try {
       await refreshUnreadMessages();
-      await loadBadgeCount('/matches/unread-count', setUnreadMatches);
+      await loadBadgeCount('/notifications/unread-count', setUnreadNotifications);
+      await loadBadgeCount('/matches/unread-count', (count) => {
+        setUnreadMatches(count);
+        previousUnreadMatchesRef.current = count;
+      });
 
       if (isAdmin) {
         await Promise.all([
@@ -104,6 +131,7 @@ export const SocketProvider = ({ children }) => {
           loadBadgeCount('/admin/matches/pending-count', (count) => {
             setPendingMatchesCount(count);
             setUnreadAdminMatches(count);
+            previousUnreadMatchesRef.current = count;
           }),
           loadBadgeCount('/admin/users/new-count', (count) => {
             setPendingUsersCount(count);
@@ -111,6 +139,8 @@ export const SocketProvider = ({ children }) => {
           }),
         ]);
       }
+
+      countsLoadedRef.current = true;
     } catch (error) {
       console.error('Error loading initial unread counts:', error);
     }
@@ -126,6 +156,7 @@ export const SocketProvider = ({ children }) => {
 
     // Load initial counts
     loadInitialUnreadCounts();
+    startBadgePolling();
 
     let removeConnectionListener;
 
@@ -184,8 +215,12 @@ export const SocketProvider = ({ children }) => {
     userChannelUnsubRef.current?.();
     userChannelUnsubRef.current = null;
     stopNotificationPolling();
+    stopBadgePolling();
     wsService.disconnect();
     setConnected(false);
+    countsLoadedRef.current = false;
+    previousUnreadMessagesRef.current = 0;
+    previousUnreadMatchesRef.current = 0;
   };
 
   const subscribeUserChannel = (userId) => {
@@ -210,8 +245,19 @@ export const SocketProvider = ({ children }) => {
           const messageCount = readCount(data);
           if (messageCount > 0) {
             setUnreadMessages(c => Math.max(c, messageCount));
+            previousUnreadMessagesRef.current = Math.max(previousUnreadMessagesRef.current, messageCount);
+          } else {
+            previousUnreadMessagesRef.current += 1;
           }
           refreshUnreadMessages();
+        } else if (notificationType === 'match') {
+          if (isAdmin) {
+            setPendingMatchesCount(c => c + 1);
+            setUnreadAdminMatches(c => c + 1);
+          } else {
+            setUnreadMatches(c => c + 1);
+          }
+          previousUnreadMatchesRef.current += 1;
         }
         
         setUnreadNotifications(c => c + 1);
@@ -232,6 +278,7 @@ export const SocketProvider = ({ children }) => {
         } else {
           setUnreadMatches(c => c + 1);
         }
+        previousUnreadMatchesRef.current += 1;
         
         setUnreadNotifications(c => c + 1);
         
@@ -244,7 +291,11 @@ export const SocketProvider = ({ children }) => {
       
       onMessageNotification: (data) => {
         notifyListeners({ ...data, type: 'message' });
-        setUnreadMessages(c => Math.max(c + 1, readCount(data)));
+        const messageCount = readCount(data);
+        setUnreadMessages(c => Math.max(c + 1, messageCount));
+        previousUnreadMessagesRef.current = messageCount > 0
+          ? Math.max(previousUnreadMessagesRef.current, messageCount)
+          : previousUnreadMessagesRef.current + 1;
         setUnreadNotifications(c => c + 1);
         
         scheduleLocalNotification(
@@ -321,6 +372,59 @@ export const SocketProvider = ({ children }) => {
         }
       } catch {}
     }, 10000);
+  };
+
+  const refreshUnreadMatches = useCallback(async (options = {}) => {
+    if (!user?.id) return;
+
+    const url = isAdmin ? '/admin/matches/pending-count' : '/matches/unread-count';
+
+    try {
+      const response = await api.get(url);
+      const nextCount = readCount(response.data);
+      const previousCount = previousUnreadMatchesRef.current;
+
+      previousUnreadMatchesRef.current = nextCount;
+
+      if (isAdmin) {
+        setPendingMatchesCount(nextCount);
+        setUnreadAdminMatches(nextCount);
+      } else {
+        setUnreadMatches(nextCount);
+      }
+
+      if (options.notifyOnIncrease && countsLoadedRef.current && nextCount > previousCount) {
+        setUnreadNotifications(c => c + (nextCount - previousCount));
+        notifyListeners({
+          type: 'match',
+          title: 'New match found',
+          body: 'A new match is waiting for you',
+          count: nextCount,
+        });
+        scheduleLocalNotification(
+          'New match found',
+          'A new match is waiting for you',
+          { type: 'match', count: nextCount }
+        );
+      }
+    } catch (error) {
+      console.log('Unable to refresh match notifications:', error.response?.status || error.message);
+    }
+  }, [user?.id, isAdmin]);
+
+  const startBadgePolling = () => {
+    if (badgePollRef.current) return;
+    badgePollRef.current = setInterval(() => {
+      refreshUnreadMessages({ notifyOnIncrease: true });
+      refreshUnreadMatches({ notifyOnIncrease: true });
+    }, 10000);
+  };
+
+  const stopBadgePolling = () => {
+    if (badgePollRef.current) {
+      clearInterval(badgePollRef.current);
+      badgePollRef.current = null;
+    }
   };
 
   const stopNotificationPolling = () => {

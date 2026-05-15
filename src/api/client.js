@@ -4,7 +4,7 @@ import { Alert } from 'react-native';
 import { getToken, removeToken, removeUser } from '../utils/tokenStorage';
 
 // Get your IP address from your computer
-const API_BASE_URL = 'http://192.168.1.2:8092/api';
+const API_BASE_URL = 'http://192.168.1.5:8092/api';
 
 // Create a navigation reference to use outside of React components
 let navigationRef = null;

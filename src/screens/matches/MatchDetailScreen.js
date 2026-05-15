@@ -24,7 +24,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
 const { width } = Dimensions.get('window');
-const API_BASE_URL = 'http://192.168.1.2:8092';
+const API_BASE_URL = 'http://192.168.1.5:8092';
 
 export default function MatchDetailScreen({ route, navigation }) {
   const { id } = route.params;
